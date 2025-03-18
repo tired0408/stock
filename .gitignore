@@ -145,3 +145,5 @@ deepLearning/**/*.png
 *.jpeg
 *.avi
 !requirements.txt
+gmcache/
+libs/
