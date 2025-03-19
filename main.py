@@ -60,6 +60,10 @@ class CodeInfo:
 
     def run_tasks(self, now_time):
         """开始运行任务"""
+        # 检查参数
+        if self.min_amount >= self.max_amount:
+            print("单笔最大金额必须大于最小金额")
+            return False
         # 程序开始运行
         if self.order_time is None:
             if self.amount_type == "担保品卖出":
@@ -203,7 +207,7 @@ def init(context):
         add_parameter(f"max_amount_{i}", 0,  name='最大:', intro="委托单笔最大金额(万)", group=name)
         add_parameter(f"button_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
     # TODO 回测使用，正式运行时请注释掉
-    schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
+    # schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
 
 
 def on_parameter(context, parameter:DictLikeParameter):
@@ -217,9 +221,12 @@ def on_parameter(context, parameter:DictLikeParameter):
     if param_name == "button":
         now_time = context.now.timestamp()
         if value == 1:
-            code_info.run_tasks(now_time)
+            result = code_info.run_tasks(now_time)
         else:
             code_info.pause_task(now_time)
+        if not result:
+            parameter["value"] = 0
+            set_parameter(**parameter)
         return
     if code_info.button == 1:
         print("正在运行,禁止修改参数")
