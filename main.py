@@ -13,14 +13,13 @@ class CodeInfo:
     """各个股票的仓位信息"""
 
     def __init__(self):
-        self.code = 0  # 股票代码(整型)
+        self.__code: str = None  # 股票代码
         self.ratio = 0  # 仓位
         self.total_time = 0  # 购买总时间(分钟)
-        self.min_amount = 50000  # 单笔最低金额(元)
-        self.max_amount = 0  # 单笔最高金额(元)
+        self.__min_amount = 50000  # 单笔最低金额(元)
+        self.__max_amount = 0  # 单笔最高金额(元)
         self.button = 0  # 下单开关
 
-        self.code_symbol = None  # 股票代码(字符串)
         self.amount_type = None  # 下单类型, 融资买入, 本金买入，担保品卖出
 
         self.order_time = None  # 上次下单时间
@@ -28,12 +27,41 @@ class CodeInfo:
         self.target_amount = None  # 当前剩余的委托目标金额
         self.interval = None  # 下单间隔时长
         self.prices = collections.deque(maxlen=2)  # 最近的2个最新价格
-    
-    def run_tasks(self):
+
+    @property
+    def code_symbol(self):
+        return self.__code
+
+    @property
+    def code(self):
+        if self.__code is None:
+            return 0
+        return int(self.__code[5:])
+
+    @code.setter
+    def code(self, value):
+        self.__code = f"SHSE.{int(value):06d}"
+
+    @property
+    def min_amount(self):
+        return self.__min_amount // 10000
+
+    @min_amount.setter
+    def min_amount(self, value):
+        self.__min_amount = value * 10000
+
+    @property
+    def max_amount(self):
+        return self.__max_amount // 10000
+
+    @max_amount.setter
+    def max_amount(self, value):
+        self.__max_amount = value * 10000
+
+    def run_tasks(self, now_time):
         """开始运行任务"""
         # 程序开始运行
         if self.order_time is None:
-            now_time = datetime.now(timezone(timedelta(hours=8)))
             if self.amount_type == "担保品卖出":
                 for position in get_position():
                     if position.symbol != self.code_symbol:
@@ -54,17 +82,14 @@ class CodeInfo:
             print(f"程序从头开始,截至时间:{self.end_time},目标金额:{self.target_amount}")
         # 程序暂停后继续运行
         else:
-            now_time = datetime.now(timezone(timedelta(hours=8)))
             self.end_time = now_time + self.end_time
             print(f"程序继续运行,截至时间:{self.end_time}")
         self.button = 1
-        self.update_interval()
+        self.update_interval(now_time)
         return True
 
-    def pause_task(self):
+    def pause_task(self, now_time):
         """暂停任务"""
-        now_time = datetime.now(timezone(timedelta(hours=8)))
-
         self.button = 0
         self.end_time = self.end_time - now_time
         print(f"程序暂停,剩余时间:{self.end_time}秒")
@@ -78,26 +103,29 @@ class CodeInfo:
         self.target_amount = None  # 委托目标金额
         print("数据发生变化,清除旧有任务")
 
-    def update_interval(self):
+    def update_interval(self, now_time):
         """更新下单间隔时长"""
-        now_time = datetime.now(timezone(timedelta(hours=8)))
-        if now_time - self.end_time > 0 or self.target_amount < self.min_amount:
+        if now_time - self.end_time > 0:
             self.interval = 999999999999
             print(f"下单已结束, 不在更新下单间隔时长")
             return 
-        interval = int((self.end_time - now_time) / (self.target_amount * 2 / (self.min_amount + self.max_amount)))
-        self.interval = random.randint(interval * 0.8, interval * 1.2)
+        if self.target_amount < self.__min_amount:
+            self.interval = 999999999999
+            print(f"剩余目标金额不足, 不在更新下单间隔时长")
+            return 
+        interval = int((self.end_time - now_time) / (self.target_amount * 2 / (self.__min_amount + self.__max_amount)))
+        self.interval = random.randint(int(interval * 0.8), int(interval * 1.2))
         print(f"更新下单间隔时长:{self.interval}秒,基准线:{interval}秒")
 
     def calculate_order_volume(self, price):
         """计算委托数量"""
-        if self.target_amount < self.min_amount:
+        if self.target_amount < self.__min_amount:
             return 0
-        if self.target_amount < self.max_amount:
+        if self.target_amount < self.__max_amount:
             order_volume = math.floor(self.target_amount / price / 100) * 100
         else:
-            max_volume = math.floor(self.max_amount / price / 100)
-            min_volume = math.ceil(self.min_amount / price / 100)
+            max_volume = math.floor(self.__max_amount / price / 100)
+            min_volume = math.ceil(self.__min_amount / price / 100)
             order_volume = random.randint(min_volume, max_volume) * 100
         self.target_amount -= order_volume * price
         return order_volume
@@ -133,6 +161,20 @@ class CodeInfo:
             ask_amount += quote['ask_v'] * quote["ask_p"]
         return bid_amount, ask_amount
 
+def test(context):
+    """"测试方法"""
+    code_info: CodeInfo = context.code_infos[0]
+    code_info.code = 600000
+    code_info.ratio = 0.33
+    code_info.total_time = 30
+    code_info.min_amount = 5
+    code_info.max_amount = 10
+    
+    context.code_key[0] = "SHSE.600000"
+
+    subscribe(symbols=code_info.code_symbol, frequency="tick", fields="symbol,quotes,price")
+    code_info.run_tasks(context.now.timestamp())
+
 def init(context):
     """
     策略中必须有init方法,且策略会首先运行init定义的内容，可用于
@@ -161,36 +203,8 @@ def init(context):
         add_parameter(f"max_amount_{i}", 0,  name='最大:', intro="委托单笔最大金额(万)", group=name)
         add_parameter(f"button_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
     # TODO 回测使用，正式运行时请注释掉
-    # finance_code.code = 600000
-    # finance_code.ratio = 0.33
-    # finance_code.total_time = 30
-    # finance_code.min_amount = 50000
-    # finance_code.max_amount = 100000
-    
-    # context.code_key[0] = "SHSE.600000"
-    # finance_code.code_symbol = "SHSE.600000"
-    
+    schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
 
-    #   def __init__(self):
-    #     self.code = 0  # 股票代码(整型)
-    #     self.ratio = 0  # 仓位
-    #     self.total_time = 0  # 购买总时间(分钟)
-    #     self.min_amount = 50000  # 单笔最低金额(元)
-    #     self.max_amount = 0  # 单笔最高金额(元)
-    #     self.button = 0  # 下单开关
-
-    #     self.code_symbol = None  # 股票代码(字符串)
-    #     self.amount_type = None  # 下单类型, 融资买入, 本金买入，担保品卖出
-
-    #     self.order_time = None  # 上次下单时间
-    #     self.end_time = None  # 下单截至时间
-    #     self.target_amount = None  # 当前剩余的委托目标金额
-    #     self.interval = None  # 下单间隔时长
-    #     self.prices = collections.deque(maxlen=2)  # 最近的2个最新价格  
-    # subscribe(symbols="SHSE.600000",
-    #           frequency='tick',
-    #           count=1,
-    #           fields='symbol,quotes,price')
 
 def on_parameter(context, parameter:DictLikeParameter):
     """动态参数修改时间推送"""
@@ -201,17 +215,18 @@ def on_parameter(context, parameter:DictLikeParameter):
     if getattr(code_info, param_name) == value:
         return
     if param_name == "button":
+        now_time = context.now.timestamp()
         if value == 1:
-            code_info.run_tasks()
+            code_info.run_tasks(now_time)
         else:
-            code_info.pause_task()
+            code_info.pause_task(now_time)
         return
     if code_info.button == 1:
         print("正在运行,禁止修改参数")
         parameter["value"] = getattr(code_info, param_name)
         set_parameter(**parameter)
         return
-    code_info.clear_task()
+    
     if param_name == "code":
         code_str = f"SHSE.{int(value):06d}"
         code_name = get_symbol_infos(1010, symbols=code_str)
@@ -227,14 +242,10 @@ def on_parameter(context, parameter:DictLikeParameter):
             unsubscribe(symbols=old_code_str, frequency="tick")
             print(f"取消订阅数据,股票代码:{old_code_str}")
         context.code_key[code_index] = code_str
-        code_info.code = value
-        code_info.code_symbol = code_str
-        return
-    if param_name in ["min_amount", "max_amount"]:
-        setattr(code_info, param_name, value * 10000)
-    else:
-        setattr(code_info, param_name, value)
-    print(f"更新股票{code_index}的{param_name}参数为:{value}")
+    code_info.clear_task()
+    setattr(code_info, param_name, value)
+    names = ["杂毛低吸(融资)", "杂毛低吸(本金)", "杂毛抛出"]
+    print(f"更新{names[code_index]}的{param_name}参数为:{value}")
 
 
 def on_tick(context, tick):
@@ -242,28 +253,34 @@ def on_tick(context, tick):
     now: datetime = context.now
     if now.hour < 9 or (now.hour == 9 and now.minute < 31):
         return
+    now_time = now.timestamp()
     symbol = tick['symbol']
     code_info: CodeInfo = context.code_infos[context.code_key.index(symbol)]
     code_info.prices.append(tick['price'])
     if code_info.button == 0:
         return
     # 撤销委托
-    if now - code_info.end_time > timedelta(seconds=30):
+    if now_time - code_info.end_time > 30:
         print("已超过最终下单时间30秒,撤销所有未结委托")
         for order in get_unfinished_orders():
             if order['symbol'] != symbol:
                 continue
             order_cancel(wait_cancel_orders=order)
-        code_info.pause_task()
+        code_info.pause_task(now_time)
         code_info.clear_task()
         return 
     # 未到订单执行时间
-    if now - code_info.order_time < timedelta(seconds=code_info.interval):
+    if now_time - code_info.order_time < code_info.interval:
         return
     order_price = code_info.get_order_price(tick["quotes"])
+    if order_price == 0:
+        print("当前买卖五档存在价格为0的情况")
+        return
     order_volume = code_info.calculate_order_volume(order_price)
     if order_volume == 0:
+        print("当前委托量为0")
         return
+    code_info.order_time = now_time
     if code_info.amount_type == "融资买入":
         credit_buying_on_margin(
             symbol=symbol,
@@ -286,7 +303,7 @@ def on_tick(context, tick):
             price=order_price,
             order_type=OrderType_Limit
         )
-    code_info.update_interval()
+    code_info.update_interval(now_time)
     print(f'{context.now}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume}')
 
 
@@ -329,8 +346,9 @@ if __name__ == '__main__':
         backtest_slippage_ratio回测滑点比例
         backtest_match_mode市价撮合模式，以下一tick/bar开盘价撮合:0，以当前tick/bar收盘价撮合：1
     '''
-    backtest_start_time = str(datetime.now() - timedelta(days=5))[:19]
-    backtest_end_time = str(datetime.now())[:19]
+    now_time = datetime.now()
+    backtest_start_time = str(datetime(now_time.year, now_time.month, now_time.day, 9, 30) - timedelta(days=1))[:19]
+    backtest_end_time = str(datetime(now_time.year, now_time.month, now_time.day, 15, 0) - timedelta(days=1))[:19]
     run(strategy_id='6273266a-f99a-11ef-8a3a-00ffce4ccc5a',
         filename='main.py',
         mode=MODE_BACKTEST,
