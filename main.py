@@ -64,6 +64,9 @@ class CodeInfo:
         if self.min_amount >= self.max_amount:
             print("单笔最大金额必须大于最小金额")
             return False
+        if self.total_time == 0:
+            print("购买总时长不能为0")
+            return False
         # 程序开始运行
         if self.order_time is None:
             if self.amount_type == "担保品卖出":
