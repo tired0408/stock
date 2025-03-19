@@ -40,7 +40,7 @@ class CodeInfo:
 
     @code.setter
     def code(self, value):
-        self.__code = f"SHSE.{int(value):06d}"
+        self.__code = value
 
     @property
     def min_amount(self):
@@ -238,11 +238,12 @@ def on_parameter(context, parameter:DictLikeParameter):
         return
     
     if param_name == "code":
-        code_str = f"SHSE.{int(value):06d}"
-        code_name = get_symbol_infos(1010, symbols=code_str)
+        value = f"{int(value):06d}"
+        code_name = get_symbol_infos(1010, symbols=[f"SHSE.{value}", f"SZSE.{value}"])
         if len(code_name) == 0:
-            print(f"输入的代码:{code_str},有误,不存在该股票")
+            print(f"输入的代码:{value},有误,不存在该股票")
             return
+        code_str = code_name[0]["symbol"]
         code_name = code_name[0]["sec_name"]
         if code_str not in context.code_key:
             subscribe(symbols=code_str, frequency="tick", fields="symbol,quotes,price")
@@ -252,6 +253,8 @@ def on_parameter(context, parameter:DictLikeParameter):
             unsubscribe(symbols=old_code_str, frequency="tick")
             print(f"取消订阅数据,股票代码:{old_code_str}")
         context.code_key[code_index] = code_str
+        code_info.code = code_str
+        return 
     code_info.clear_task()
     setattr(code_info, param_name, value)
     names = ["杂毛低吸(融资)", "杂毛低吸(本金)", "杂毛抛出"]
