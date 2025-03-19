@@ -60,6 +60,7 @@ class CodeInfo:
 
     def run_tasks(self, now_time):
         """开始运行任务"""
+        now_timestamp = now_time.timestamp()
         # 检查参数
         if self.min_amount >= self.max_amount:
             print("单笔最大金额必须大于最小金额")
@@ -83,23 +84,24 @@ class CodeInfo:
                 print(f"当前本金:{net_assets}")
                 target_amount = int(self.ratio * net_assets)
         
-            self.end_time = now_time + self.total_time * 60
-            self.order_time = now_time
+            self.end_time = now_timestamp + self.total_time * 60
+            self.order_time = now_timestamp
             self.target_amount = target_amount
-            print(f"程序从头开始,截至时间:{self.end_time},目标金额:{self.target_amount}")
+            print(f"{now_time}:程序从头开始,截至时间:{datetime.fromtimestamp(self.end_time)},目标金额:{self.target_amount}")
         # 程序暂停后继续运行
         else:
-            self.end_time = now_time + self.end_time
-            print(f"程序继续运行,截至时间:{self.end_time}")
+            self.end_time = now_timestamp + self.end_time
+            print(f"{now_time}:程序继续运行,截至时间:{datetime.fromtimestamp(self.end_time)}")
         self.button = 1
-        self.update_interval(now_time)
+        self.update_interval(now_timestamp)
         return True
 
     def pause_task(self, now_time):
         """暂停任务"""
+        now_timestamp = now_time.timestamp()
         self.button = 0
-        self.end_time = self.end_time - now_time
-        print(f"程序暂停,剩余时间:{self.end_time}秒")
+        self.end_time = self.end_time - now_timestamp
+        print(f"{now_timestamp}:程序暂停,剩余时间:{self.end_time}秒")
     
     def clear_task(self):
         """清除任务"""
@@ -122,7 +124,7 @@ class CodeInfo:
             return 
         interval = int((self.end_time - now_time) / (self.target_amount * 2 / (self.__min_amount + self.__max_amount)))
         self.interval = random.randint(int(interval * 0.8), int(interval * 1.2))
-        print(f"更新下单间隔时长:{self.interval}秒,基准线:{interval}秒")
+        print(f"更新下单间隔,基准线:{interval}秒,实际时长:{self.interval}秒")
 
     def calculate_order_volume(self, price):
         """计算委托数量"""
@@ -171,7 +173,7 @@ class CodeInfo:
 def test(context):
     """"测试方法"""
     code_info: CodeInfo = context.code_infos[0]
-    code_info.code = 600000
+    code_info.code = "SHSE.600000"
     code_info.ratio = 0.33
     code_info.total_time = 30
     code_info.min_amount = 5
@@ -180,7 +182,7 @@ def test(context):
     context.code_key[0] = "SHSE.600000"
 
     subscribe(symbols=code_info.code_symbol, frequency="tick", fields="symbol,quotes,price")
-    code_info.run_tasks(context.now.timestamp())
+    code_info.run_tasks(context.now)
 
 def init(context):
     """
@@ -222,7 +224,7 @@ def on_parameter(context, parameter:DictLikeParameter):
     if getattr(code_info, param_name) == value:
         return
     if param_name == "button":
-        now_time = context.now.timestamp()
+        now_time = context.now
         if value == 1:
             result = code_info.run_tasks(now_time)
         else:
@@ -289,35 +291,43 @@ def on_tick(context, tick):
     if order_price == 0:
         print("当前买卖五档存在价格为0的情况")
         return
-    order_volume = code_info.calculate_order_volume(order_price)
-    if order_volume == 0:
+    order_volume_value = code_info.calculate_order_volume(order_price)
+    if order_volume_value == 0:
         print("当前委托量为0")
         return
     code_info.order_time = now_time
     if code_info.amount_type == "融资买入":
-        credit_buying_on_margin(
+        order_volume(
             symbol=symbol,
-            volume=order_volume,
+            volume=order_volume_value,
             price=order_price,
+            side=OrderSide_Buy,
             order_type=OrderType_Limit,
-            position_src=PositionSrc_Unknown
+            position_effect=PositionEffect_Open,
         )
+        # credit_buying_on_margin(
+        #     symbol=symbol,
+        #     volume=order_volume,
+        #     price=order_price,
+        #     order_type=OrderType_Limit,
+        #     position_src=PositionSrc_Unknown
+        # )
     elif code_info.amount_type == "本金买入":
         credit_buying_on_collateral(
             symbol=symbol,
-            volume=order_volume,
+            volume=order_volume_value,
             price=order_price,
             order_type=OrderType_Limit
         )
     else:
         credit_selling_on_collateral(
             symbol=symbol,
-            volume=order_volume,
+            volume=order_volume_value,
             price=order_price,
             order_type=OrderType_Limit
         )
     code_info.update_interval(now_time)
-    print(f'{context.now}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume}')
+    print(f'{context.now}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume_value}')
 
 
 def on_order_status(context, order):
@@ -359,13 +369,18 @@ if __name__ == '__main__':
         backtest_slippage_ratio回测滑点比例
         backtest_match_mode市价撮合模式，以下一tick/bar开盘价撮合:0，以当前tick/bar收盘价撮合：1
     '''
-    now_time = datetime.now()
-    backtest_start_time = str(datetime(now_time.year, now_time.month, now_time.day, 9, 30) - timedelta(days=1))[:19]
-    backtest_end_time = str(datetime(now_time.year, now_time.month, now_time.day, 15, 0) - timedelta(days=1))[:19]
-    run(strategy_id='6273266a-f99a-11ef-8a3a-00ffce4ccc5a',
+    # input_strategy_id = '6273266a-f99a-11ef-8a3a-00ffce4ccc5a'
+    # input_token = '90a9433545fd918efd82ca08be0ad76fcc08761b'
+    # TODO 润
+    input_strategy_id = '8445f33e-fa5e-11ef-9673-00e2696502c8'
+    input_token = '675f2a6aa2ede2e6b5f807a1b1ad94c59d4b6ceb'
+    input_now_time = datetime.now()
+    backtest_start_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 9, 30) - timedelta(days=1))[:19]
+    backtest_end_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 15, 0) - timedelta(days=1))[:19]
+    run(strategy_id=input_strategy_id,
         filename='main.py',
         mode=MODE_BACKTEST,
-        token='90a9433545fd918efd82ca08be0ad76fcc08761b',
+        token=input_token,
         backtest_start_time=backtest_start_time,
         backtest_end_time=backtest_end_time,
         backtest_adjust=ADJUST_PREV,
@@ -373,5 +388,3 @@ if __name__ == '__main__':
         backtest_commission_ratio=0.0001,
         backtest_slippage_ratio=0.0001,
         backtest_match_mode=1)
-
-
