@@ -154,24 +154,24 @@ class CodeInfo:
         price_up = self.prices[1] > self.prices[0] if len(self.prices) == 2 else None
         if self.amount_type != "担保品卖出":
             if price_up is not None and not price_up:
-                print("价格处于下跌状态, 随机获取买1-3价格")
-                return quotes[random.randint(0, 2)]["bid_p"]
+                print("价格处于下跌状态, 使用买1-3价格")
+                return [quotes[i]["bid_p"] for i in range(3)]
             bid_amount, ask_amount = self.calculated_amount(quotes)
             if ask_amount * 1.2 >= bid_amount:
-                print("卖方金额大于买方金额, 随机获取买1-3价格")
-                return quotes[random.randint(0, 2)]["bid_p"]
-            print("卖方金额小于买方金额, 随机获取卖1-3价格")
-            return quotes[random.randint(0, 2)]["ask_p"]
+                print("卖方金额大于买方金额,使用买1-3价格")
+                return [quotes[i]["bid_p"] for i in range(3)]
+            print("卖方金额小于买方金额, 使用卖1-3价格")
+            return [quotes[i]["ask_p"] for i in range(3)]
         else:
             if price_up is not None and price_up:
-                print("价格处于下跌状态, 随机获取卖1-3价格")
-                return quotes[random.randint(0, 2)]["ask_p"]
+                print("价格处于下跌状态, 使用卖1-3价格")
+                return [quotes[i]["ask_p"] for i in range(3)]
             bid_amount, ask_amount = self.calculated_amount(quotes)
             if bid_amount * 1.2 >= ask_amount:
-                print("卖方金额小于买方金额, 随机获取卖1-3价格")
-                return quotes[random.randint(0, 2)]["ask_p"]
-            print("卖方金额大于买方金额, 随机获取买1-3价格")
-            return quotes[random.randint(0, 2)]["bid_p"]
+                print("卖方金额小于买方金额, 使用卖1-3价格")
+                return [quotes[i]["ask_p"] for i in range(3)]
+            print("卖方金额大于买方金额, 使用买1-3价格")
+            return [quotes[i]["bid_p"] for i in range(3)]
 
     @staticmethod
     def calculated_amount(quotes: List[dict]):
@@ -298,8 +298,9 @@ def on_tick(context, tick):
     # 未到订单执行时间
     if now_timestamp - code_info.order_time < code_info.interval[0]:
         return
+    order_price_list = code_info.get_order_price(tick["quotes"])
     for _ in range(code_info.interval[1]):
-        order_price = code_info.get_order_price(tick["quotes"])
+        order_price = order_price_list[random.randint(0, 2)]
         if order_price == 0:
             print("当前买卖五档存在价格为0的情况")
             return
