@@ -123,8 +123,8 @@ class CodeInfo:
             self.interval[0] = 999999999999
             print(f"剩余目标金额不足, 不在更新下单间隔时长")
             return 
-        interval = int((self.end_time - now_time) / (self.target_amount * 2 / (self.__min_amount + self.__max_amount)))
-        interval_time = random.randint(int(interval * 0.8), int(interval * 1.2))
+        interval = math.ceil((self.end_time - now_time) / (self.target_amount * 2 / (self.__min_amount + self.__max_amount)))
+        interval_time = random.randint(math.ceil(interval * 0.8), math.ceil(interval * 1.2))
         if interval_time >= 3:
             self.interval = [interval_time, 1]
         else:
