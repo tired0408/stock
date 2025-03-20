@@ -75,6 +75,7 @@ class CodeInfo:
                     if position.symbol != self.code_symbol:
                         continue
                     target_amount = position.amount * self.ratio
+                    print(position)
                     break
                 else:
                     print(f"当前无该标的股票的持仓:{self.code_symbol}")
@@ -87,11 +88,11 @@ class CodeInfo:
             self.end_time = now_timestamp + self.total_time * 60
             self.order_time = now_timestamp
             self.target_amount = target_amount
-            print(f"{now_time}:程序从头开始,截至时间:{datetime.fromtimestamp(self.end_time)},目标金额:{self.target_amount}")
+            print(f"{str(now_time)[11:19]}:程序从头开始,截至时间:{datetime.fromtimestamp(self.end_time)},目标金额:{self.target_amount}")
         # 程序暂停后继续运行
         else:
             self.end_time = now_timestamp + self.end_time
-            print(f"{now_time}:程序继续运行,截至时间:{datetime.fromtimestamp(self.end_time)}")
+            print(f"{str(now_time)[11:19]}:程序继续运行,截至时间:{datetime.fromtimestamp(self.end_time)}")
         self.button = 1
         self.update_interval(now_timestamp)
         return True
@@ -101,7 +102,7 @@ class CodeInfo:
         now_timestamp = now_time.timestamp()
         self.button = 0
         self.end_time = self.end_time - now_timestamp
-        print(f"{now_timestamp}:程序暂停,剩余时间:{self.end_time}秒")
+        print(f"{str(now_time)[11:19]}:程序暂停,剩余时间:{self.end_time}秒")
     
     def clear_task(self):
         """清除任务"""
@@ -148,17 +149,23 @@ class CodeInfo:
         price_up = self.prices[1] > self.prices[0]
         if self.amount_type != "担保品卖出":
             if not price_up:
+                print("价格处于下跌状态, 随机获取买1-3价格")
                 return quotes[random.randint(0, 2)]["bid_p"]
             bid_amount, ask_amount = self.calculated_amount(quotes)
             if ask_amount * 1.2 >= bid_amount:
+                print("卖方金额大于买方金额, 随机获取买1-3价格")
                 return quotes[random.randint(0, 2)]["bid_p"]
+            print("卖方金额小于买方金额, 随机获取卖1-3价格")
             return quotes[random.randint(0, 2)]["ask_p"]
         else:
             if price_up:
+                print("价格处于下跌状态, 随机获取卖1-3价格")
                 return quotes[random.randint(0, 2)]["ask_p"]
             bid_amount, ask_amount = self.calculated_amount(quotes)
             if bid_amount * 1.2 >= ask_amount:
+                print("卖方金额小于买方金额, 随机获取卖1-3价格")
                 return quotes[random.randint(0, 2)]["ask_p"]
+            print("卖方金额大于买方金额, 随机获取买1-3价格")
             return quotes[random.randint(0, 2)]["bid_p"]
 
     @staticmethod
@@ -226,12 +233,11 @@ def on_parameter(context, parameter:DictLikeParameter):
     if param_name == "button":
         now_time = context.now
         if value == 1:
-            result = code_info.run_tasks(now_time)
+            if not code_info.run_tasks(now_time):
+                parameter["value"] = 0
+                set_parameter(**parameter)
         else:
             code_info.pause_task(now_time)
-        if not result:
-            parameter["value"] = 0
-            set_parameter(**parameter)
         return
     if code_info.button == 1:
         print("正在运行,禁止修改参数")
@@ -297,21 +303,13 @@ def on_tick(context, tick):
         return
     code_info.order_time = now_time
     if code_info.amount_type == "融资买入":
-        order_volume(
+        credit_buying_on_margin(
             symbol=symbol,
-            volume=order_volume_value,
+            volume=order_volume,
             price=order_price,
-            side=OrderSide_Buy,
             order_type=OrderType_Limit,
-            position_effect=PositionEffect_Open,
+            position_src=PositionSrc_Unknown
         )
-        # credit_buying_on_margin(
-        #     symbol=symbol,
-        #     volume=order_volume,
-        #     price=order_price,
-        #     order_type=OrderType_Limit,
-        #     position_src=PositionSrc_Unknown
-        # )
     elif code_info.amount_type == "本金买入":
         credit_buying_on_collateral(
             symbol=symbol,
@@ -327,7 +325,7 @@ def on_tick(context, tick):
             order_type=OrderType_Limit
         )
     code_info.update_interval(now_time)
-    print(f'{context.now}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume_value}')
+    print(f'{str(context.now)[11:19]}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume_value}')
 
 
 def on_order_status(context, order):
@@ -342,17 +340,18 @@ def on_order_status(context, order):
     price = order['price']
     # 委托数量
     volume = order['volume']
-    # 买卖方向，1为买入，2为卖出
-    side = order['side']
-    # 开平仓类型，1为开仓，2为平仓
-    effect = order['position_effect']
-    if side == 1 and effect == 1:
-        side_effect = '买入'
-    elif side == 2 and effect == 2:
-        side_effect = "卖出"
+    # 委托业务类型
+    order_bussiness = order["order_business"]
+    if order_bussiness == OrderBusiness_CREDIT_BOM:
+        operation_name = "融资买入"
+    elif order_bussiness == OrderBusiness_CREDIT_BOC:
+        operation_name = "担保品买入"
+    elif order_bussiness == OrderBusiness_CREDIT_SOC:
+        operation_name = "担保品卖出"
     else:
-        raise Exception("订单异常状态")
-    print(f'{context.now}:标的:{symbol},操作:以限价委托{side_effect},委托价格:{price},委托数量:{volume},'
+        print(order)
+        raise Exception(f"订单异常状态")
+    print(f'{str(context.now)[11:19]}:标的:{symbol},操作类型:{operation_name},委托价格:{price},委托数量:{volume},'
           f'成交量:{order["filled_volume"]},均价:{order["filled_vwap"]:.3f}')
 
 if __name__ == '__main__':
@@ -369,11 +368,11 @@ if __name__ == '__main__':
         backtest_slippage_ratio回测滑点比例
         backtest_match_mode市价撮合模式，以下一tick/bar开盘价撮合:0，以当前tick/bar收盘价撮合：1
     '''
-    # input_strategy_id = '6273266a-f99a-11ef-8a3a-00ffce4ccc5a'
-    # input_token = '90a9433545fd918efd82ca08be0ad76fcc08761b'
+    input_strategy_id = '58d95d1d-0535-11f0-8677-00ffce4ccc5a'
+    input_token = '42d01f0aa40c9cd4a4d77cac825db51ac95d3d41'
     # TODO 润
-    input_strategy_id = '8445f33e-fa5e-11ef-9673-00e2696502c8'
-    input_token = '675f2a6aa2ede2e6b5f807a1b1ad94c59d4b6ceb'
+    # input_strategy_id = '8445f33e-fa5e-11ef-9673-00e2696502c8'
+    # input_token = '675f2a6aa2ede2e6b5f807a1b1ad94c59d4b6ceb'
     input_now_time = datetime.now()
     backtest_start_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 9, 30) - timedelta(days=1))[:19]
     backtest_end_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 15, 0) - timedelta(days=1))[:19]
