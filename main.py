@@ -25,7 +25,7 @@ class CodeInfo:
         self.order_time = None  # 上次下单时间
         self.end_time = None  # 下单截至时间
         self.target_amount = None  # 当前剩余的委托目标金额
-        self.interval = None  # 下单间隔时长
+        self.interval = [None, 1]  # 下单间隔时长,每次间隔下单数量
         self.prices = collections.deque(maxlen=2)  # 最近的2个最新价格
 
     @property
@@ -116,16 +116,21 @@ class CodeInfo:
     def update_interval(self, now_time):
         """更新下单间隔时长"""
         if now_time - self.end_time > 0:
-            self.interval = 999999999999
+            self.interval[0] = 999999999999
             print(f"下单已结束, 不在更新下单间隔时长")
             return 
         if self.target_amount < self.__min_amount:
-            self.interval = 999999999999
+            self.interval[0] = 999999999999
             print(f"剩余目标金额不足, 不在更新下单间隔时长")
             return 
         interval = int((self.end_time - now_time) / (self.target_amount * 2 / (self.__min_amount + self.__max_amount)))
-        self.interval = random.randint(int(interval * 0.8), int(interval * 1.2))
-        print(f"更新下单间隔,基准线:{interval}秒,实际时长:{self.interval}秒")
+        interval_time = random.randint(int(interval * 0.8), int(interval * 1.2))
+        if interval_time >= 3:
+            self.interval = [interval_time, 1]
+        else:
+            interval_time_2 = random.randint(3, 6)
+            self.interval = [interval_time_2, math.ceil(interval_time_2 / interval_time)]
+        print(f"更新下单间隔,基准线:{interval}秒,实际时长:{self.interval[0]}秒,每次间隔下单数:{self.interval[1]}")
 
     def calculate_order_volume(self, price):
         """计算委托数量"""
@@ -146,9 +151,9 @@ class CodeInfo:
             prices (List[float]): 最近的2个最新价格
             quotes (List[dict]): 买卖5档数据
         """
-        price_up = self.prices[1] > self.prices[0]
+        price_up = self.prices[1] > self.prices[0] if len(self.prices) == 2 else None
         if self.amount_type != "担保品卖出":
-            if not price_up:
+            if price_up is not None and not price_up:
                 print("价格处于下跌状态, 随机获取买1-3价格")
                 return quotes[random.randint(0, 2)]["bid_p"]
             bid_amount, ask_amount = self.calculated_amount(quotes)
@@ -158,7 +163,7 @@ class CodeInfo:
             print("卖方金额小于买方金额, 随机获取卖1-3价格")
             return quotes[random.randint(0, 2)]["ask_p"]
         else:
-            if price_up:
+            if price_up is not None and price_up:
                 print("价格处于下跌状态, 随机获取卖1-3价格")
                 return quotes[random.randint(0, 2)]["ask_p"]
             bid_amount, ask_amount = self.calculated_amount(quotes)
@@ -219,7 +224,7 @@ def init(context):
         add_parameter(f"max_amount_{i}", 0,  name='最大:', intro="委托单笔最大金额(万)", group=name)
         add_parameter(f"button_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
     # TODO 回测使用，正式运行时请注释掉
-    # schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
+    schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
 
 
 def on_parameter(context, parameter:DictLikeParameter):
@@ -271,17 +276,17 @@ def on_parameter(context, parameter:DictLikeParameter):
 
 def on_tick(context, tick):
     """数据事件驱动函数, 当订阅的数据有更新时, 会触发该函数, 该函数的参数为订阅的数据"""
-    now: datetime = context.now
-    if now.hour < 9 or (now.hour == 9 and now.minute < 31):
+    now_time: datetime = context.now
+    if now_time.hour < 9 or (now_time.hour == 9 and now_time.minute < 31):
         return
-    now_time = now.timestamp()
+    now_timestamp = now_time.timestamp()
     symbol = tick['symbol']
     code_info: CodeInfo = context.code_infos[context.code_key.index(symbol)]
     code_info.prices.append(tick['price'])
     if code_info.button == 0:
         return
     # 撤销委托
-    if now_time - code_info.end_time > 30:
+    if now_timestamp - code_info.end_time > 30:
         print("已超过最终下单时间30秒,撤销所有未结委托")
         for order in get_unfinished_orders():
             if order['symbol'] != symbol:
@@ -291,41 +296,42 @@ def on_tick(context, tick):
         code_info.clear_task()
         return 
     # 未到订单执行时间
-    if now_time - code_info.order_time < code_info.interval:
+    if now_timestamp - code_info.order_time < code_info.interval[0]:
         return
-    order_price = code_info.get_order_price(tick["quotes"])
-    if order_price == 0:
-        print("当前买卖五档存在价格为0的情况")
-        return
-    order_volume_value = code_info.calculate_order_volume(order_price)
-    if order_volume_value == 0:
-        print("当前委托量为0")
-        return
-    code_info.order_time = now_time
-    if code_info.amount_type == "融资买入":
-        credit_buying_on_margin(
-            symbol=symbol,
-            volume=order_volume,
-            price=order_price,
-            order_type=OrderType_Limit,
-            position_src=PositionSrc_Unknown
-        )
-    elif code_info.amount_type == "本金买入":
-        credit_buying_on_collateral(
-            symbol=symbol,
-            volume=order_volume_value,
-            price=order_price,
-            order_type=OrderType_Limit
-        )
-    else:
-        credit_selling_on_collateral(
-            symbol=symbol,
-            volume=order_volume_value,
-            price=order_price,
-            order_type=OrderType_Limit
-        )
-    code_info.update_interval(now_time)
-    print(f'{str(context.now)[11:19]}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume_value}')
+    for _ in range(code_info.interval[1]):
+        order_price = code_info.get_order_price(tick["quotes"])
+        if order_price == 0:
+            print("当前买卖五档存在价格为0的情况")
+            return
+        order_volume_value = code_info.calculate_order_volume(order_price)
+        if order_volume_value == 0:
+            print("当前委托量为0")
+            return
+        code_info.order_time = now_timestamp
+        if code_info.amount_type == "融资买入":
+            credit_buying_on_margin(
+                symbol=symbol,
+                volume=order_volume_value,
+                price=order_price,
+                order_type=OrderType_Limit,
+                position_src=PositionSrc_Unknown
+            )
+        elif code_info.amount_type == "本金买入":
+            credit_buying_on_collateral(
+                symbol=symbol,
+                volume=order_volume_value,
+                price=order_price,
+                order_type=OrderType_Limit
+            )
+        else:
+            credit_selling_on_collateral(
+                symbol=symbol,
+                volume=order_volume_value,
+                price=order_price,
+                order_type=OrderType_Limit
+            )
+        code_info.update_interval(now_timestamp)
+        print(f'{str(context.now)[11:19]}:标的:{symbol},操作:{code_info.amount_type},以限价发起委托, 价格:{order_price}, 数量:{order_volume_value}')
 
 
 def on_order_status(context, order):
@@ -370,9 +376,6 @@ if __name__ == '__main__':
     '''
     input_strategy_id = '58d95d1d-0535-11f0-8677-00ffce4ccc5a'
     input_token = '42d01f0aa40c9cd4a4d77cac825db51ac95d3d41'
-    # TODO 润
-    # input_strategy_id = '8445f33e-fa5e-11ef-9673-00e2696502c8'
-    # input_token = '675f2a6aa2ede2e6b5f807a1b1ad94c59d4b6ceb'
     input_now_time = datetime.now()
     backtest_start_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 9, 30) - timedelta(days=1))[:19]
     backtest_end_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 15, 0) - timedelta(days=1))[:19]
