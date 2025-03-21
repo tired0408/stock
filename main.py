@@ -24,7 +24,7 @@ class CodeInfo:
 
         self.order_time = None  # 上次下单时间
         self.end_time = None  # 下单截至时间
-        self.target_amount = None  # 当前剩余的委托目标金额
+        self.target_value = None  # 买入：剩余买入金额，卖出：剩余卖出持仓量
         self.interval = [None, 1]  # 下单间隔时长,每次间隔下单数量
         self.prices = collections.deque(maxlen=2)  # 最近的2个最新价格
 
@@ -74,8 +74,7 @@ class CodeInfo:
                 for position in get_position():
                     if position.symbol != self.code_symbol:
                         continue
-                    target_amount = position.amount * self.ratio
-                    print(position)
+                    target_value = math.ceil(position.volume * self.ratio)
                     break
                 else:
                     print(f"当前无该标的股票的持仓:{self.code_symbol}")
@@ -83,16 +82,18 @@ class CodeInfo:
             else:
                 net_assets = get_cash().nav
                 print(f"当前本金:{net_assets}")
-                target_amount = int(self.ratio * net_assets)
+                target_value = int(self.ratio * net_assets)
         
             self.end_time = now_timestamp + self.total_time * 60
             self.order_time = now_timestamp
-            self.target_amount = target_amount
-            print(f"{str(now_time)[11:19]}:程序从头开始,截至时间:{datetime.fromtimestamp(self.end_time)},目标金额:{self.target_amount}")
+            self.target_value = target_value
+            end_time_str = datetime.fromtimestamp(self.end_time).strftime("%H:%M:%S")
+            print(f"{str(now_time)[11:19]}:程序从头开始,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
         # 程序暂停后继续运行
         else:
             self.end_time = now_timestamp + self.end_time
-            print(f"{str(now_time)[11:19]}:程序继续运行,截至时间:{datetime.fromtimestamp(self.end_time)}")
+            end_time_str = datetime.fromtimestamp(self.end_time).strftime("%H:%M:%S")
+            print(f"{str(now_time)[11:19]}:程序继续运行,截至时间:{end_time_str}")
         self.button = 1
         self.update_interval(now_timestamp)
         return True
@@ -110,7 +111,7 @@ class CodeInfo:
             return
         self.end_time = None  # 下单截至时间
         self.order_time = None  # 上次下单时间
-        self.target_amount = None  # 委托目标金额
+        self.target_value = None  # 委托目标金额
         print("数据发生变化,清除旧有任务")
 
     def update_interval(self, now_time):
@@ -119,11 +120,12 @@ class CodeInfo:
             self.interval[0] = 999999999999
             print(f"下单已结束, 不在更新下单间隔时长")
             return 
-        if self.target_amount < self.__min_amount:
+        if self.target_value  <= 0:
             self.interval[0] = 999999999999
             print(f"剩余目标金额不足, 不在更新下单间隔时长")
             return 
-        interval = math.ceil((self.end_time - now_time) / (self.target_amount * 2 / (self.__min_amount + self.__max_amount)))
+        remain_amount = self.target_value if self.amount_type != "担保品卖出" else self.target_value * self.prices[-1]
+        interval = math.ceil((self.end_time - now_time) / (remain_amount * 2 / (self.__min_amount + self.__max_amount)))
         interval_time = random.randint(math.ceil(interval * 0.8), math.ceil(interval * 1.2))
         if interval_time >= 3:
             self.interval = [interval_time, 1]
@@ -134,15 +136,20 @@ class CodeInfo:
 
     def calculate_order_volume(self, price):
         """计算委托数量"""
-        if self.target_amount < self.__min_amount:
-            return 0
-        if self.target_amount < self.__max_amount:
-            order_volume = math.floor(self.target_amount / price / 100) * 100
+        if self.amount_type == "担保品卖出" and self.target_value * price <= self.max_amount:
+            self.target_value = 0
+            return self.target_value
+        if self.amount_type != "担保品卖出" and self.target_value < self.max_amount:
+            self.target_value = 0
+            return math.floor(self.target_value / price / 100) * 100
+        
+        max_volume = math.floor(self.__max_amount / price / 100)
+        min_volume = math.ceil(self.__min_amount / price / 100)
+        order_volume = random.randint(min_volume, max_volume) * 100
+        if self.amount_type == "担保品卖出":
+            self.target_value -= order_volume
         else:
-            max_volume = math.floor(self.__max_amount / price / 100)
-            min_volume = math.ceil(self.__min_amount / price / 100)
-            order_volume = random.randint(min_volume, max_volume) * 100
-        self.target_amount -= order_volume * price
+            self.target_value -= order_volume * price
         return order_volume
 
     def get_order_price(self, quotes: List[dict]):
@@ -151,7 +158,7 @@ class CodeInfo:
             prices (List[float]): 最近的2个最新价格
             quotes (List[dict]): 买卖5档数据
         """
-        price_up = self.prices[1] > self.prices[0] if len(self.prices) == 2 else None
+        price_up = self.prices[1] > self.prices[0]
         if self.amount_type != "担保品卖出":
             if price_up is not None and not price_up:
                 print("价格处于下跌状态, 使用买1-3价格")
@@ -224,7 +231,7 @@ def init(context):
         add_parameter(f"max_amount_{i}", 0,  name='最大:', intro="委托单笔最大金额(万)", group=name)
         add_parameter(f"button_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
     # TODO 回测使用，正式运行时请注释掉
-    schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
+    # schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
 
 
 def on_parameter(context, parameter:DictLikeParameter):
@@ -277,13 +284,11 @@ def on_parameter(context, parameter:DictLikeParameter):
 def on_tick(context, tick):
     """数据事件驱动函数, 当订阅的数据有更新时, 会触发该函数, 该函数的参数为订阅的数据"""
     now_time: datetime = context.now
-    if now_time.hour < 9 or (now_time.hour == 9 and now_time.minute < 31):
-        return
     now_timestamp = now_time.timestamp()
     symbol = tick['symbol']
     code_info: CodeInfo = context.code_infos[context.code_key.index(symbol)]
     code_info.prices.append(tick['price'])
-    if code_info.button == 0:
+    if code_info.button == 0 or len(code_info.prices) < 2:
         return
     # 撤销委托
     if now_timestamp - code_info.end_time > 30:
