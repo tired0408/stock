@@ -25,7 +25,7 @@ class TradeBase(abc.ABC):
         self.remain_time = None  # 剩余运行时间
         self.order_prices = None  # 可委托的价格列表
         self._last_order_time = None  # 上次下单时间
-        self.interval = None  # 下单间隔时间
+        self.interval = 99999999  # 下单间隔时间
         self.prices = collections.deque(maxlen=2)  # 最近的2个最新价格
         self.quotes = []  # 当前五档行情
         self.target_value = None  # 目标金额(股数)
@@ -65,6 +65,15 @@ class TradeBase(abc.ABC):
             return 0
         return 1
 
+    def set_interval_full(self):
+        """设置下单间隔为无限长"""
+        self.interval = 9999
+
+    def is_interval_full(self):
+        """判断下单间隔是否是无限长"""
+        return self.interval == 9999
+    
+
     def clear_run_cache(self):
         """清理运行缓存"""
         self.end_time = -1
@@ -88,13 +97,9 @@ class TradeBase(abc.ABC):
             if self.target_value == 0:
                 print(f"[{self._code}]{now_time_str}:目标金额(股数)为0,无法运行")
                 return False
-            print(f"[{self._code}]{now_time_str}:等待第一波tick数据到来")
-            while self.order_prices is None:
-                time.sleep(0.01)
-            print(f"[{self._code}]{now_time_str}:第一波tick数据到来,开始进行交易")
-            self._last_order_time = now_time.timestamp()
-            self.update_interval(now_time)
             # 开始运行程序
+            self._last_order_time = now_time.timestamp()
+            self.set_interval_full()
             self.end_time = now_time.timestamp() + self.ui_total_time * 60
             self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
             end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
@@ -116,17 +121,16 @@ class TradeBase(abc.ABC):
             print(f"[{self._code}]{now_time_str}:程序继续运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
         return True
 
-        
     def each_trade(self, context):
         """每毫秒进行交易判断"""
         now_time: datetime = context.now
         now_time_str = now_time.strftime('%H:%M:%S')
-        if now_time.timestamp() - self._last_order_time < self.interval:
+        print(now_time)
+        if self._last_order_time + self.interval - now_time.timestamp() > 0:
+            return
+        if len(self.order_prices) == 0:
             return
         order_price_value = random.choice(self.order_prices)
-        if order_price_value == 0:
-            print(f"[{self._code}]{now_time_str}:当前买卖五档的价格存在全部为0的情况")
-            return
         order_volume_value = self.calculate_order_volume(order_price_value)
         if order_volume_value == 0:
             print(f"[{self._code}]{now_time_str}:当前委托量存在异常为0")
@@ -166,16 +170,18 @@ class TradeBase(abc.ABC):
         if self.end_time == -1:
             return
         self.update_order_prices(now_time_str, quotes)
+        if self._last_order_time is not None and self.is_interval_full():
+            self.update_interval(now_time)
 
     def update_interval(self, now_time: datetime):
         """更新下单间隔时长"""
         now_time_str = now_time.strftime('%H:%M:%S')
         if now_time.timestamp() - self.end_time > 0:
-            self.interval = 99999999999
+            self.set_interval_full()
             print(f"[{self._code}]{now_time_str}:下单结束,不再更新下单间隔时长")
             return
         if self.target_value  <= 0:
-            self.interval = 99999999999
+            self.set_interval_full()
             print(f"[{self._code}]{now_time_str}:剩余目标金额不足, 不在更新下单间隔时长")
             return 
         remain_amount = self.calculate_remain_amount()
@@ -330,9 +336,10 @@ def test(context):
     trade_class.ui_min_amount = 5
     trade_class.ui_max_amount = 10
     
+    print(f"{str(context.now)[11:19]}:开始运行测试情况")
     subscribe(symbols=trade_class._code, frequency="tick", fields="symbol,quotes,price")
     trade_class.change_status(context)
-    print(f"{str(context.now)[11:19]}:开始运行测试情况")
+    
 
 def init(context):
     """
@@ -456,7 +463,7 @@ if __name__ == '__main__':
     input_strategy_id = '58d95d1d-0535-11f0-8677-00ffce4ccc5a'
     input_token = '42d01f0aa40c9cd4a4d77cac825db51ac95d3d41'
     input_now_time = datetime.now()
-    backtest_start_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 9, 30) - timedelta(days=1))[:19]
+    backtest_start_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 9, 30) - timedelta(days=3))[:19]
     backtest_end_time = str(datetime(input_now_time.year, input_now_time.month, input_now_time.day, 15, 0) - timedelta(days=1))[:19]
     run(strategy_id=input_strategy_id,
         filename='main.py',
