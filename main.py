@@ -136,7 +136,7 @@ class TradeBase(abc.ABC):
         if self.end_time - now_time.timestamp() > 0:
             return
         timer_stop(self.timer_id['timer_id'])
-        parameter_map: Dict[DictLikeParameter] = context.parameters
+        parameter_map: Dict[str, DictLikeParameter] = context.parameters
         for i in range(3):
             code_key = f"ui_code_{i}"
             if parameter_map[code_key]["value"] != self.ui_code:
@@ -412,7 +412,8 @@ def on_tick(context, tick):
     symbol = tick['symbol']
     price = tick['price']
     quotes = tick["quotes"]
-    for group, symbol_trade in context.trade_map.items():
+    trade_map: Dict[str, TradeBase] = context.trade_map
+    for group, symbol_trade in trade_map.items():
         if symbol_trade._code != symbol:
             continue
         symbol_trade.update_tick(context.now, price, quotes)
