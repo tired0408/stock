@@ -327,20 +327,7 @@ class TradeSell(TradeBase):
             print(f"[{self._code}]{now_time_str}:当前无该标的股票持仓")
             return 0
         
-def test(context):
-    """"测试方法"""
-    trade_class: TradeBase = context.trade_map["杂毛低吸(融资)"]
-    trade_class.ui_code = "SHSE.600000"
-    trade_class.ui_ratio = 0.33
-    trade_class.ui_total_time = 30
-    trade_class.ui_min_amount = 5
-    trade_class.ui_max_amount = 10
-    
-    print(f"{str(context.now)[11:19]}:开始运行测试情况")
-    subscribe(symbols=trade_class._code, frequency="tick", fields="symbol,quotes,price")
-    trade_class.change_status(context)
-    
-
+        
 def init(context):
     """
     策略中必须有init方法,且策略会首先运行init定义的内容，可用于
@@ -366,8 +353,6 @@ def init(context):
         add_parameter(f"ui_max_amount_{i}", 0,  name='最大:', intro="委托单笔最大金额(万)", group=name)
         add_parameter(f"ui_status_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
     context.trade_map = trade_map
-    # TODO 回测使用，正式运行时请注释掉
-    schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
 
 
 def on_parameter(context, parameter:DictLikeParameter):
