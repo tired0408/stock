@@ -2,15 +2,14 @@
 from __future__ import print_function, absolute_import
 from gm.api import *
 from gm.csdk.c_sdk import BarLikeDict2, TickLikeDict2
-from gm.model import DictLikeAccountStatus, DictLikeExecRpt, DictLikeIndicator, DictLikeOrder, DictLikeParameter
+from gm.model import DictLikeAccountStatus, DictLikeExecRpt, DictLikeIndicator, DictLikeOrder, DictLikeParameter, Dict
 import abc
 import math
 import time
 import random
-import threading
 import collections
 from typing import List
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 class TradeBase(abc.ABC):
     """各个股票的交易类"""
@@ -19,18 +18,18 @@ class TradeBase(abc.ABC):
         self._code = None  # 股票代码
         self.ui_ratio = 0  # 仓位
         self.ui_total_time = 0  # 购买总时长(分钟)
-        self.__min_amount = 5  # 单笔最低金额(万)
-        self.__max_amount = 0  # 单笔最高金额(万)
+        self._min_amount = 5  # 单笔最低金额(万)
+        self._max_amount = 0  # 单笔最高金额(万)
 
         self.end_time = -1  # 结束时间
-        self.__pause_time = None  # 暂停时间
-        self.__condition = threading.Condition()  # 线程锁
+        self.remain_time = None  # 剩余运行时间
         self.order_prices = None  # 可委托的价格列表
-        self.__last_order_time = None  # 上次下单时间
+        self._last_order_time = None  # 上次下单时间
         self.interval = None  # 下单间隔时间
         self.prices = collections.deque(maxlen=2)  # 最近的2个最新价格
         self.quotes = []  # 当前五档行情
         self.target_value = None  # 目标金额(股数)
+        self.timer_id = None
 
     @property
     def ui_code(self):
@@ -44,94 +43,109 @@ class TradeBase(abc.ABC):
 
     @property
     def ui_min_amount(self):
-        return self.__min_amount // 10000
+        return self._min_amount // 10000
 
     @ui_min_amount.setter
     def ui_min_amount(self, value):
-        self.__min_amount = value * 10000
+        self._min_amount = value * 10000
 
     @property
     def ui_max_amount(self):
-        return self.__max_amount // 10000
+        return self._max_amount // 10000
 
     @ui_max_amount.setter
     def ui_max_amount(self, value):
-        self.__max_amount = value * 10000
+        self._max_amount = value * 10000
 
-    def stop(self):
-        """停止脚本"""
+    @property
+    def ui_status(self):
+        if self.end_time == -1:
+            return 0
+        if self.remain_time is not None:
+            return 0
+        return 1
+
+    def clear_run_cache(self):
+        """清理运行缓存"""
         self.end_time = -1
-        self.__pause_time = None
-        with self.__condition:
-            self.__condition.notify_all()
+        self.remain_time = None
+        self.order_prices = None
 
     def change_status(self, context):
         """修改程序运行状态"""
+        now_time: datetime = context.now
+        now_time_str = now_time.strftime('%H:%M:%S')
         # 停止转为开始运行
         if self.end_time == -1:
             # 检查参数
-            if self.__min_amount >= self.__max_amount:
-                print(f"[{self._code}]单笔最大金额必须大于最小金额")
+            if self._min_amount >= self._max_amount:
+                print(f"[{self._code}]{now_time_str}:单笔最大金额必须大于最小金额")
                 return False
             if self.ui_total_time == 0:
-                print(f"[{self._code}]购买总时长不能为0")
+                print(f"[{self._code}]{now_time_str}:购买总时长不能为0")
                 return False
+            self.target_value = self.calculated_target_value(now_time_str)
+            if self.target_value == 0:
+                print(f"[{self._code}]{now_time_str}:目标金额(股数)为0,无法运行")
+                return False
+            print(f"[{self._code}]{now_time_str}:等待第一波tick数据到来")
+            while self.order_prices is None:
+                time.sleep(0.01)
+            print(f"[{self._code}]{now_time_str}:第一波tick数据到来,开始进行交易")
+            self._last_order_time = now_time.timestamp()
+            self.update_interval(now_time)
             # 开始运行程序
-            self.end_time = context.now.timestamp() + self.ui_total_time * 60
-            self.__pause_time = None
-            threading.Thread(target=self.run, args=(context,)).start()
+            self.end_time = now_time.timestamp() + self.ui_total_time * 60
+            self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
+            end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
+            print(f"[{self._code}]{now_time_str}:开始运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
+        elif self.end_time - now_time.timestamp() < 0:
+            self.clear_run_cache()
+            print(f"[{self._code}]{now_time_str}:已到截至时间,清理运行缓存数据")
         # 运行转为暂停
-        elif self.__pause_time is None:
-            self.__pause_time = context.now.timestamp()
+        elif self.remain_time is None:
+            self.remain_time = int(self.end_time - now_time.timestamp())
+            timer_stop(self.timer_id['timer_id'])
+            print(f"[{self._code}]{now_time_str}:程序暂停运行,剩余运行时长:{self.remain_time}秒")
         # 暂停转为运行
         else:
-            with self.__condition:
-                self.__condition.notify_all()
+            self.end_time = now_time.timestamp() + self.remain_time
+            self.remain_time = None
+            self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
+            end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
+            print(f"[{self._code}]{now_time_str}:程序继续运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
         return True
 
         
-    def run(self, context):
-        """运行脚本"""
+    def each_trade(self, context):
+        """每毫秒进行交易判断"""
         now_time: datetime = context.now
         now_time_str = now_time.strftime('%H:%M:%S')
-        end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
-        self.target_value = self.calculated_target_value(now_time_str)
-        if self.target_value == 0:
-            print(f"[{self._code}]{now_time_str}:目标金额(股数)为0,无法运行")
-            return 
-        print(f"[{self._code}]{now_time_str}:开始运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
-        with self.__condition:
-            print(f"[{self._code}]{str(now_time)[11:19]}:等待第一波tick数据到来")
-            self.__condition.wait()
-            print(f"[{self._code}]{str(now_time)[11:19]}:第一波tick数据到来,开始进行交易")
-        while True:
-            time.sleep(0.0001)
-            now_time: datetime = context.now
-            now_time_str = datetime.fromtimestamp(now_time).strftime('%H:%M:%S')
-            if self.end_time - now_time.timestamp() > 0:
-                break
-            if self.__pause_time is not None:
-                print(f"[{self._code}]{now_time_str}:暂停运行")
-                with self.__condition:
-                    self.__condition.wait()
-                if self.__pause_time is not None:
-                    self.end_time += now_time.timestamp() - self.__pause_time
-                    self.__pause_time = None
-                    end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
-                    print(f"[{self._code}]{now_time_str}:继续运行,截至时间延迟至:{end_time_str}")
+        if now_time.timestamp() - self._last_order_time < self.interval:
+            return
+        order_price_value = random.choice(self.order_prices)
+        if order_price_value == 0:
+            print(f"[{self._code}]{now_time_str}:当前买卖五档的价格存在全部为0的情况")
+            return
+        order_volume_value = self.calculate_order_volume(order_price_value)
+        if order_volume_value == 0:
+            print(f"[{self._code}]{now_time_str}:当前委托量存在异常为0")
+        self.place_order(now_time_str, order_price_value, order_volume_value)
+        self.update_interval(now_time)
+        self._last_order_time = now_time.timestamp()
+        if self.end_time - now_time.timestamp() > 0:
+            return
+        timer_stop(self.timer_id['timer_id'])
+        parameter_map: Dict[DictLikeParameter] = context.parameters
+        for i in range(3):
+            code_key = f"ui_code_{i}"
+            if parameter_map[code_key]["value"] != self.ui_code:
                 continue
-            if now_time.timestamp() - self.__last_order_time < self.interval:
-                continue
-            order_price_value = random.choice(self.order_prices)
-            if order_price_value == 0:
-                print(f"[{self._code}]{now_time_str}:当前买卖五档的价格存在全部为0的情况")
-                continue
-            order_volume_value = self.calculate_order_volume(order_price_value)
-            if order_volume_value == 0:
-                print(f"[{self._code}]{now_time_str}:当前委托量存在异常为0")
-            self.place_order(now_time_str, order_price_value, order_volume_value)
-            self.update_interval(now_time)
-        print(f"[{self._code}]{now_time_str}:已停止运行")
+            parameter = parameter_map[f"ui_status_{i}"]
+            parameter["value"] = 0
+            set_parameter(**parameter)
+        print(f"[{self._code}]{now_time_str}:已到达截至时间,停止运行,传递到动态参数")
+
 
     @staticmethod
     def calculated_amount(quotes: List[dict]):
@@ -149,17 +163,14 @@ class TradeBase(abc.ABC):
         self.quotes = quotes
         if len(self.prices) < 2:
             return
+        if self.end_time == -1:
+            return
         self.update_order_prices(now_time_str, quotes)
-        if self.__last_order_time is None:
-            self.__last_order_time = now_time.timestamp()
-            self.update_interval(now_time)
-            with self.__condition:
-                self.__condition.notify_all()
 
-    def update_interval(self, now_time):
+    def update_interval(self, now_time: datetime):
         """更新下单间隔时长"""
         now_time_str = now_time.strftime('%H:%M:%S')
-        if now_time - self.end_time > 0:
+        if now_time.timestamp() - self.end_time > 0:
             self.interval = 99999999999
             print(f"[{self._code}]{now_time_str}:下单结束,不再更新下单间隔时长")
             return
@@ -168,7 +179,7 @@ class TradeBase(abc.ABC):
             print(f"[{self._code}]{now_time_str}:剩余目标金额不足, 不在更新下单间隔时长")
             return 
         remain_amount = self.calculate_remain_amount()
-        interval = (self.end_time - now_time) / (remain_amount * 2 / (self.__min_amount + self.__max_amount))
+        interval = (self.end_time - now_time.timestamp()) / (remain_amount * 2 / (self._min_amount + self._max_amount))
         self.interval = random.uniform(0.8, 1.2) * interval
         print(f"[{self._code}]{now_time_str}:更新下单间隔,基准线:{interval:.3f}秒,实际时长:{self.interval:.3f}秒")
 
@@ -201,21 +212,21 @@ class TradeBuy(TradeBase):
         """更新可委托列表"""
         buy_amount, sell_amount = self.calculated_amount(quotes)
         if self.prices[1] < self.prices[0]:
-            print(f"[{self._code}]{now_time_str}:价格处于下跌状态, 使用买1-3价格")
+            # print(f"[{self._code}]{now_time_str}:价格处于下跌状态, 使用买1-3价格")
             self.order_prices = [quotes[i]["bid_p"] for i in range(3) if quotes[i]["bid_p"] > 0]    
         elif sell_amount * 1.2 >= buy_amount:
-            print(f"[{self._code}]{now_time_str}:卖方金额大于买方金额,使用买1-3价格")
+            # print(f"[{self._code}]{now_time_str}:卖方金额大于买方金额,使用买1-3价格")
             self.order_prices = [quotes[i]["bid_p"] for i in range(3) if quotes[i]["bid_p"] > 0]
         else:
-            print(f"[{self._code}]{now_time_str}:卖方金额小于买方金额, 使用卖1-3价格")
+            # print(f"[{self._code}]{now_time_str}:卖方金额小于买方金额, 使用卖1-3价格")
             self.order_prices = [quotes[i]["ask_p"] for i in range(3) if quotes[i]["ask_p"] > 0]
 
     def calculate_order_volume(self, price):
         """计算委托数量"""
-        if self.target_value <= self.__max_amount:
+        if self.target_value <= self._max_amount:
             return math.floor(self.target_value / price / 100) * 100
-        max_volume = math.floor(self.__max_amount / price / 100)
-        min_volume = math.ceil(self.__min_amount / price / 100)
+        max_volume = math.floor(self._max_amount / price / 100)
+        min_volume = math.ceil(self._min_amount / price / 100)
         order_volume = random.randint(min_volume, max_volume) * 100
         return order_volume
 
@@ -242,7 +253,8 @@ class TradeBuyMargin(TradeBuy):
             order_type=OrderType_Limit,
             position_src=PositionSrc_Unknown
         )
-        print(f'{now_time_str}:标的:{self._code},操作:融资买入,以限价发起委托, 价格:{price}, 数量:{volume}')
+        self.target_value -= volume * price
+        print(f'[{self._code}]{now_time_str}:融资买入,以限价发起委托, 价格:{price}, 数量:{volume}')
 
 class TradeBuyCollateral(TradeBuy):
     """本金买入类"""
@@ -254,7 +266,8 @@ class TradeBuyCollateral(TradeBuy):
             price=price,
             order_type=OrderType_Limit
         )
-        print(f'{now_time_str}:标的:{self._code},操作:担保品买入,以限价发起委托, 价格:{price}, 数量:{volume}')
+        self.target_value -= volume * price
+        print(f'[{self._code}]{now_time_str}:担保品买入,以限价发起委托, 价格:{price}, 数量:{volume}')
 
 class TradeSell(TradeBase):
     """担保品卖出的交易类"""
@@ -263,21 +276,21 @@ class TradeSell(TradeBase):
         """更新可委托列表"""
         bid_amount, ask_amount = self.calculated_amount(quotes)
         if self.prices[1] > self.prices[0]:
-            print(f"[{self._code}]{now_time_str}:价格处于上涨状态, 使用卖1-3价格")
+            # print(f"[{self._code}]{now_time_str}:价格处于上涨状态, 使用卖1-3价格")
             self.order_prices = [quotes[i]["ask_p"] for i in range(3) if quotes[i]["ask_p"] > 0]    
         elif bid_amount * 1.2 >= ask_amount:
-            print(f"[{self._code}]{now_time_str}:卖方金额小于买方金额,使用卖1-3价格")
+            # print(f"[{self._code}]{now_time_str}:卖方金额小于买方金额,使用卖1-3价格")
             self.order_prices = [quotes[i]["ask_p"] for i in range(3) if quotes[i]["ask_p"] > 0]
         else:
-            print(f"[{self._code}]{now_time_str}:卖方金额大于买方金额, 使用买1-3价格")
+            # print(f"[{self._code}]{now_time_str}:卖方金额大于买方金额, 使用买1-3价格")
             self.order_prices = [quotes[i]["bid_p"] for i in range(3) if quotes[i]["bid_p"] > 0]
     
     def calculate_order_volume(self, price):
         """计算委托数量"""
-        if self.target_value*price <= self.__max_amount:
+        if self.target_value*price <= self._max_amount:
             return self.target_value
-        max_volume = math.floor(self.__max_amount / price / 100)
-        min_volume = math.ceil(self.__min_amount / price / 100)
+        max_volume = math.floor(self._max_amount / price / 100)
+        min_volume = math.ceil(self._min_amount / price / 100)
         order_volume = random.randint(min_volume, max_volume) * 100
         return order_volume
 
@@ -289,7 +302,8 @@ class TradeSell(TradeBase):
             price=price,
             order_type=OrderType_Limit
         )
-        print(f'{now_time_str}:标的:{self._code},操作:担保品卖出,以限价发起委托, 价格:{price}, 数量:{volume}')
+        self.target_value -= volume
+        print(f'[{self._code}]{now_time_str}:担保品卖出,以限价发起委托, 价格:{price}, 数量:{volume}')
     
     def calculate_remain_amount(self):
         """计算剩余金额"""
@@ -343,7 +357,7 @@ def init(context):
         add_parameter(f"ui_total_time_{i}", 0,  name='时长:', intro="自动下单总时长(分钟)", group=name)
         add_parameter(f"ui_min_amount_{i}", 5,  name='最小:', intro="委托单笔最小金额(万)", group=name)
         add_parameter(f"ui_max_amount_{i}", 0,  name='最大:', intro="委托单笔最大金额(万)", group=name)
-        add_parameter(f"ui_button_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
+        add_parameter(f"ui_status_{i}", 0,  name='开/停:', intro="1是运行,其他暂停", group=name)
     context.trade_map = trade_map
     # TODO 回测使用，正式运行时请注释掉
     schedule(schedule_func=test, date_rule="1d", time_rule="14:30:00")
@@ -352,27 +366,27 @@ def init(context):
 def on_parameter(context, parameter:DictLikeParameter):
     """动态参数修改时间推送"""
     code_key = parameter.group
-    param_name = parameter.key
+    param_name = parameter.key[:-2]
     value = parameter.value
     symbol_trade: TradeBase = context.trade_map[code_key]
     # 无数据变化不响应
     if getattr(symbol_trade, param_name) == value:
         return
-    # 防止运行中篡改参数
-    if symbol_trade.status == 1:
-        print("正在运行,禁止修改参数")
-        parameter["value"] = getattr(symbol_trade, param_name)
-        set_parameter(**parameter)
-        return
     # 运行按钮
-    if param_name == "button":
-        if symbol_trade.change_status():
+    if param_name == "ui_status":
+        if symbol_trade.change_status(context):
             return
         parameter["value"] = 0 if parameter["value"] == 1 else 1
         set_parameter(**parameter)
         return
+    # 防止运行中篡改参数
+    if symbol_trade.ui_status == 1:
+        print("正在运行,禁止修改参数")
+        parameter["value"] = getattr(symbol_trade, param_name)
+        set_parameter(**parameter)
+        return
     # 订阅(取消订阅)相应股票信息
-    if param_name == "code":
+    if param_name == "ui_code":
         symbol_info = f"{int(value):06d}"
         symbol_info = get_symbol_infos(1010, symbols=[f"SHSE.{symbol_info}", f"SZSE.{symbol_info}"])
         if len(symbol_info) == 0:
@@ -380,7 +394,7 @@ def on_parameter(context, parameter:DictLikeParameter):
             parameter["value"] = symbol_trade.ui_code
             set_parameter(**parameter)
             return
-        if symbol_trade.code is not None:
+        if symbol_trade._code is not None:
             unsubscribe(symbols=symbol_trade._code, frequency="tick")
             print(f"取消订阅数据,股票代码:{symbol_trade._code}")
         symbol_info = symbol_info[0]
@@ -390,8 +404,7 @@ def on_parameter(context, parameter:DictLikeParameter):
             subscribe(symbols=symbol_info["symbol"], frequency="tick", fields="symbol,quotes,price")
             print(f"订阅数据,股票代码:{symbol_info['symbol']}, 股票名称:{symbol_info['sec_name']}")
         value = symbol_info["symbol"]
-    # 停止脚本
-    trade.stop()
+    symbol_trade.clear_run_cache()
     setattr(symbol_trade, param_name, value)
     print(f"更新{code_key}的{param_name}参数为:{value}")
 
@@ -399,12 +412,14 @@ def on_tick(context, tick):
     symbol = tick['symbol']
     price = tick['price']
     quotes = tick["quotes"]
-    symbol_trade: TradeBase = context.trade_map[symbol]
-    symbol_trade.update_tick(context.now, price, quotes)
+    for group, symbol_trade in context.trade_map.items():
+        if symbol_trade._code != symbol:
+            continue
+        symbol_trade.update_tick(context.now, price, quotes)
 
 def on_order_status(context, order: DictLikeOrder):
     """委托状态更新时间"""
-    if order['status'] == 3:
+    if order['status'] != 3:
         return 
     symbol = order['symbol']  # 标的代码
     price = order['price']  # 委托价格
@@ -421,6 +436,8 @@ def on_order_status(context, order: DictLikeOrder):
         raise Exception(f"订单异常状态")
     print(f'[{symbol}]{str(context.now)[11:19]}:操作类型:{operation_name},委托价格:{price},委托数量:{volume},'
           f'成交量:{order["filled_volume"]},均价:{order["filled_vwap"]:.3f}')
+
+
 if __name__ == '__main__':
     '''
         strategy_id策略ID, 由系统生成
