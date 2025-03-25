@@ -104,7 +104,7 @@ class TradeBase(abc.ABC):
             self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
             end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
             print(f"[{self._code}]{now_time_str}:开始运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
-        elif self.end_time - now_time.timestamp() < 0:
+        elif self.end_time - now_time.timestamp() < 0 or self.is_interval_full():
             self.clear_run_cache()
             print(f"[{self._code}]{now_time_str}:已到截至时间,清理运行缓存数据")
         # 运行转为暂停
@@ -125,8 +125,19 @@ class TradeBase(abc.ABC):
         """每毫秒进行交易判断"""
         now_time: datetime = context.now
         now_time_str = now_time.strftime('%H:%M:%S')
-        print(now_time)
         if self._last_order_time + self.interval - now_time.timestamp() > 0:
+            return
+        if self.end_time - now_time.timestamp() < 0 or self.is_interval_full():
+            print(f"[{self._code}]{now_time_str}:已到达截至时间,停止运行,传递到动态参数")
+            timer_stop(self.timer_id['timer_id'])
+            parameter_map: Dict[str, DictLikeParameter] = context.parameters
+            for i in range(3):
+                code_key = f"ui_code_{i}"
+                if parameter_map[code_key]["value"] != self.ui_code:
+                    continue
+                parameter = parameter_map[f"ui_status_{i}"]
+                parameter["value"] = 0
+                set_parameter(**parameter)
             return
         if len(self.order_prices) == 0:
             return
@@ -134,21 +145,12 @@ class TradeBase(abc.ABC):
         order_volume_value = self.calculate_order_volume(order_price_value)
         if order_volume_value == 0:
             print(f"[{self._code}]{now_time_str}:当前委托量存在异常为0")
+            return
         self.place_order(now_time_str, order_price_value, order_volume_value)
         self.update_interval(now_time)
         self._last_order_time = now_time.timestamp()
-        if self.end_time - now_time.timestamp() > 0:
-            return
-        timer_stop(self.timer_id['timer_id'])
-        parameter_map: Dict[str, DictLikeParameter] = context.parameters
-        for i in range(3):
-            code_key = f"ui_code_{i}"
-            if parameter_map[code_key]["value"] != self.ui_code:
-                continue
-            parameter = parameter_map[f"ui_status_{i}"]
-            parameter["value"] = 0
-            set_parameter(**parameter)
-        print(f"[{self._code}]{now_time_str}:已到达截至时间,停止运行,传递到动态参数")
+
+        
 
 
     @staticmethod
@@ -170,7 +172,8 @@ class TradeBase(abc.ABC):
         if self.end_time == -1:
             return
         self.update_order_prices(now_time_str, quotes)
-        if self._last_order_time is not None and self.is_interval_full():
+        if self.end_time is not None and self._last_order_time is not None and self.is_interval_full():
+            print(f"[{self._code}]{now_time_str}:更新下单间隔,提供程序开始运行的信号")
             self.update_interval(now_time)
 
     def update_interval(self, now_time: datetime):
@@ -182,7 +185,7 @@ class TradeBase(abc.ABC):
             return
         if self.target_value  <= 0:
             self.set_interval_full()
-            print(f"[{self._code}]{now_time_str}:剩余目标金额不足, 不在更新下单间隔时长")
+            print(f"[{self._code}]{now_time_str}:剩余目标金额(股数)不足, 不在更新下单间隔时长")
             return 
         remain_amount = self.calculate_remain_amount()
         interval = (self.end_time - now_time.timestamp()) / (remain_amount * 2 / (self._min_amount + self._max_amount))
