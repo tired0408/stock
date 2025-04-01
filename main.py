@@ -97,10 +97,22 @@ class TradeBase(abc.ABC):
             if self.target_value == 0:
                 print(f"[{self._code}]{now_time_str}:目标金额(股数)为0,无法运行")
                 return False
-            # 开始运行程序
+            print(f"[{self._code}]{now_time_str}:等待tick数据到来,请勿修改其他模块的动态参数")
+            for _ in range(100):
+                if self.order_prices is not None:
+                    time.sleep(1)
+                    continue
+                break
+            else:
+                print(f"[{self._code}]{now_time_str}:等待时间过长,没有等到tick数据")
+            if self._max_amount < self.prices[-1] * 200:
+                print(f"[{self._code}]{now_time_str}:单笔最大金额不足两股,请提高单笔最大金额")
+                return False
             self._last_order_time = now_time.timestamp()
-            self.set_interval_full()
             self.end_time = now_time.timestamp() + self.ui_total_time * 60
+            self.update_interval(now_time)
+            # 开始运行程序
+            print(f"[{self._code}]{now_time_str}:tick初始数据已接收,开始运行程序。可以操作其他模块的动态参数")
             self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
             end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
             print(f"[{self._code}]{now_time_str}:开始运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
@@ -151,8 +163,6 @@ class TradeBase(abc.ABC):
         self._last_order_time = now_time.timestamp()
 
         
-
-
     @staticmethod
     def calculated_amount(quotes: List[dict]):
         """计算买卖5档的成交量"""
@@ -172,9 +182,7 @@ class TradeBase(abc.ABC):
         if self.end_time == -1:
             return
         self.update_order_prices(now_time_str, quotes)
-        if self.end_time is not None and self._last_order_time is not None and self.is_interval_full():
-            print(f"[{self._code}]{now_time_str}:更新下单间隔,提供程序开始运行的信号")
-            self.update_interval(now_time)
+
 
     def update_interval(self, now_time: datetime):
         """更新下单间隔时长"""
@@ -219,6 +227,16 @@ class TradeBuy(TradeBase):
 
     def update_order_prices(self, now_time_str, quotes):
         """更新可委托列表"""
+        buy_prices = [quotes[i]["bid_p"] for i in range(5) if quotes[i]["bid_p"] > 0]
+        if len(buy_prices) == 0:
+            self.order_prices = []
+            print(f"[{self._code}]{now_time_str}:当前股票跌停")
+            return
+        sell_prices = [quotes[i]["ask_p"] for i in range(5) if quotes[i]["ask_p"] > 0]
+        if len(sell_prices) == 0:
+            self.order_prices = []
+            print(f"[{self._code}]{now_time_str}:当前股票涨停")
+            return
         buy_amount, sell_amount = self.calculated_amount(quotes)
         if self.prices[1] < self.prices[0]:
             # print(f"[{self._code}]{now_time_str}:价格处于下跌状态, 使用买1-3价格")
@@ -234,9 +252,9 @@ class TradeBuy(TradeBase):
         """计算委托数量"""
         if self.target_value <= self._max_amount:
             return math.floor(self.target_value / price / 100) * 100
-        max_volume = math.floor(self._max_amount / price / 100)
-        min_volume = math.ceil(self._min_amount / price / 100)
-        order_volume = random.randint(min_volume, max_volume) * 100
+        max_volume = self._max_amount / price / 100
+        min_volume = max(self._min_amount / price / 100, 1)
+        order_volume = int(random.uniform(min_volume, max_volume)) * 100
         return order_volume
 
     def calculate_remain_amount(self):
@@ -283,6 +301,16 @@ class TradeSell(TradeBase):
 
     def update_order_prices(self, now_time_str, quotes):
         """更新可委托列表"""
+        buy_prices = [quotes[i]["bid_p"] for i in range(5) if quotes[i]["bid_p"] > 0]
+        if len(buy_prices) == 0:
+            self.order_prices = []
+            print(f"[{self._code}]{now_time_str}:当前股票跌停")
+            return
+        sell_prices = [quotes[i]["ask_p"] for i in range(5) if quotes[i]["ask_p"] > 0]
+        if len(sell_prices) == 0:
+            self.order_prices = []
+            print(f"[{self._code}]{now_time_str}:当前股票涨停")
+            return
         bid_amount, ask_amount = self.calculated_amount(quotes)
         if self.prices[1] > self.prices[0]:
             # print(f"[{self._code}]{now_time_str}:价格处于上涨状态, 使用卖1-3价格")
