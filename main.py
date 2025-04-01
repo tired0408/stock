@@ -97,25 +97,18 @@ class TradeBase(abc.ABC):
             if self.target_value == 0:
                 print(f"[{self._code}]{now_time_str}:目标金额(股数)为0,无法运行")
                 return False
-            print(f"[{self._code}]{now_time_str}:等待tick数据到来,请勿修改其他模块的动态参数")
-            for _ in range(100):
-                if self.order_prices is not None:
-                    time.sleep(1)
-                    continue
-                break
-            else:
-                print(f"[{self._code}]{now_time_str}:等待时间过长,没有等到tick数据")
-            if self._max_amount < self.prices[-1] * 200:
-                print(f"[{self._code}]{now_time_str}:单笔最大金额不足两股,请提高单笔最大金额")
-                return False
+            print(f"[{self._code}]{now_time_str}:更新参数")
             self._last_order_time = now_time.timestamp()
             self.end_time = now_time.timestamp() + self.ui_total_time * 60
             self.update_interval(now_time)
+            if self.order_prices is None:
+                print(f"[{self._code}]{now_time_str}:未接收到足够数据,无法开始,请稍后重试")
+                return False
             # 开始运行程序
-            print(f"[{self._code}]{now_time_str}:tick初始数据已接收,开始运行程序。可以操作其他模块的动态参数")
+            print(f"[{self._code}]{now_time_str}:异步启动程序")
             self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
             end_time_str = datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')
-            print(f"[{self._code}]{now_time_str}:开始运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
+            print(f"[{self._code}]{now_time_str}:程序开始运行,截至时间:{end_time_str},目标金额(股数):{self.target_value}")
         elif self.end_time - now_time.timestamp() < 0 or self.is_interval_full():
             self.clear_run_cache()
             print(f"[{self._code}]{now_time_str}:已到截至时间,清理运行缓存数据")
@@ -179,8 +172,6 @@ class TradeBase(abc.ABC):
         self.quotes = quotes
         if len(self.prices) < 2:
             return
-        if self.end_time == -1:
-            return
         self.update_order_prices(now_time_str, quotes)
 
 
@@ -230,12 +221,12 @@ class TradeBuy(TradeBase):
         buy_prices = [quotes[i]["bid_p"] for i in range(5) if quotes[i]["bid_p"] > 0]
         if len(buy_prices) == 0:
             self.order_prices = []
-            print(f"[{self._code}]{now_time_str}:当前股票跌停")
+            # print(f"[{self._code}]{now_time_str}:当前股票跌停")
             return
         sell_prices = [quotes[i]["ask_p"] for i in range(5) if quotes[i]["ask_p"] > 0]
         if len(sell_prices) == 0:
             self.order_prices = []
-            print(f"[{self._code}]{now_time_str}:当前股票涨停")
+            # print(f"[{self._code}]{now_time_str}:当前股票涨停")
             return
         buy_amount, sell_amount = self.calculated_amount(quotes)
         if self.prices[1] < self.prices[0]:
@@ -304,12 +295,12 @@ class TradeSell(TradeBase):
         buy_prices = [quotes[i]["bid_p"] for i in range(5) if quotes[i]["bid_p"] > 0]
         if len(buy_prices) == 0:
             self.order_prices = []
-            print(f"[{self._code}]{now_time_str}:当前股票跌停")
+            # print(f"[{self._code}]{now_time_str}:当前股票跌停")
             return
         sell_prices = [quotes[i]["ask_p"] for i in range(5) if quotes[i]["ask_p"] > 0]
         if len(sell_prices) == 0:
             self.order_prices = []
-            print(f"[{self._code}]{now_time_str}:当前股票涨停")
+            # print(f"[{self._code}]{now_time_str}:当前股票涨停")
             return
         bid_amount, ask_amount = self.calculated_amount(quotes)
         if self.prices[1] > self.prices[0]:
