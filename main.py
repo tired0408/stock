@@ -97,13 +97,13 @@ class TradeBase(abc.ABC):
             if self.target_value == 0:
                 print(f"[{self._code}]{now_time_str}:目标金额(股数)为0,无法运行")
                 return False
+            if self.order_prices is None:
+                print(f"[{self._code}]{now_time_str}:未接收到足够数据,无法开始,请稍后重试")
+                return False
             print(f"[{self._code}]{now_time_str}:更新参数")
             self._last_order_time = now_time.timestamp()
             self.end_time = now_time.timestamp() + self.ui_total_time * 60
             self.update_interval(now_time)
-            if self.order_prices is None:
-                print(f"[{self._code}]{now_time_str}:未接收到足够数据,无法开始,请稍后重试")
-                return False
             # 开始运行程序
             print(f"[{self._code}]{now_time_str}:异步启动程序")
             self.timer_id = timer(timer_func=self.each_trade, period=1, start_delay=0)
@@ -151,9 +151,10 @@ class TradeBase(abc.ABC):
         if order_volume_value == 0:
             print(f"[{self._code}]{now_time_str}:当前委托量存在异常为0")
             return
+        self._last_order_time = now_time.timestamp()
         self.place_order(now_time_str, order_price_value, order_volume_value)
         self.update_interval(now_time)
-        self._last_order_time = now_time.timestamp()
+        
 
         
     @staticmethod
@@ -178,17 +179,22 @@ class TradeBase(abc.ABC):
     def update_interval(self, now_time: datetime):
         """更新下单间隔时长"""
         now_time_str = now_time.strftime('%H:%M:%S')
-        if now_time.timestamp() - self.end_time > 0:
+        now_timestamp = now_time.timestamp()
+        if now_timestamp - self.end_time > 0:
             self.set_interval_full()
             print(f"[{self._code}]{now_time_str}:下单结束,不再更新下单间隔时长")
             return
-        if self.target_value  <= 0:
+        if self.target_value <= 0:
             self.set_interval_full()
             print(f"[{self._code}]{now_time_str}:剩余目标金额(股数)不足, 不在更新下单间隔时长")
             return 
         remain_amount = self.calculate_remain_amount()
-        interval = (self.end_time - now_time.timestamp()) / (remain_amount * 2 / (self._min_amount + self._max_amount))
+        interval = (self.end_time - now_timestamp) / (remain_amount * 2 / (self._min_amount + self._max_amount))
         self.interval = random.uniform(0.8, 1.2) * interval
+        if self._last_order_time + self.interval > self.end_time:
+            self.interval = max(self.end_time - self._last_order_time - 3, 0)
+            print(f"[{self._code}]{now_time_str}:更新下单间隔，剩余时间不足,基准线:{interval:.3f}秒,实际时长:{self.interval:.3f}秒")
+            return 
         print(f"[{self._code}]{now_time_str}:更新下单间隔,基准线:{interval:.3f}秒,实际时长:{self.interval:.3f}秒")
 
     @abc.abstractmethod
