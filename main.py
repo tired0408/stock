@@ -1,11 +1,9 @@
 ﻿# coding=utf-8
 from __future__ import print_function, absolute_import
 from gm.api import *
-from gm.csdk.c_sdk import BarLikeDict2, TickLikeDict2
-from gm.model import DictLikeAccountStatus, DictLikeExecRpt, DictLikeIndicator, DictLikeOrder, DictLikeParameter, Dict
+from gm.model import DictLikeOrder, DictLikeParameter, Dict
 import abc
 import math
-import time
 import random
 import collections
 from typing import List
