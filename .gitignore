@@ -148,3 +148,5 @@ deepLearning/**/*.png
 gmcache/
 libs/
 data/
+# myself
+.vscode
