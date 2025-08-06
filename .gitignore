@@ -145,8 +145,6 @@ deepLearning/**/*.png
 *.jpeg
 *.avi
 !requirements.txt
-gmcache/
-libs/
-data/
 # myself
 .vscode
+data/
