@@ -44,6 +44,15 @@ if len(open_position_list) == 0:
     print(f"截至{output_data[-1][1]},账户状态为平仓状态")
 else:
     print(f"截至{open_position_list[-1][1]},账户状态为开{open_position_list[-1][3]}仓状态")
+print("输出隔夜盈亏情况")
+overnight_data = []
+for data in output_data:
+    if data[1] == data[7]:
+        continue
+    overnight_data.append(data)
+win_rate = len([i for i in overnight_data if i[-1] > 0]) / len(overnight_data)
+profit_loss = sum([i[-1] for i in overnight_data])
+print(f"隔夜胜率:{win_rate*100:.2f}%, 盈亏:{profit_loss}")
 print("输出整理后的成交明细表")
 wb = xlsxwriter.Workbook(os.path.join(os.path.dirname(path), "整理成交明细.xlsx"))
 ws = wb.add_worksheet()
