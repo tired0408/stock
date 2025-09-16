@@ -52,7 +52,7 @@ for data in output_data:
     overnight_data.append(data)
 win_rate = len([i for i in overnight_data if i[-1] > 0]) / len(overnight_data)
 profit_loss = sum([i[-1] for i in overnight_data])
-print(f"隔夜胜率:{win_rate*100:.2f}%, 盈亏:{profit_loss}")
+print(f"隔夜胜率:{win_rate*100:.2f}%, 盈亏:{profit_loss:.4f}")
 print("输出整理后的成交明细表")
 wb = xlsxwriter.Workbook(os.path.join(os.path.dirname(path), "整理成交明细.xlsx"))
 ws = wb.add_worksheet()
