@@ -44,7 +44,10 @@ def szse_summary(date_str):
     Args:
         date_str (str): 日期,例如20251011
     """
-    return ak.stock_szse_summary(date=date_str)
+    rd = ak.stock_szse_summary(date=date_str)
+    if len(rd) == 0:
+        raise Exception("深圳交易所的每日概况数据还没有更新")
+    return rd
 
 @cache("shse_summary")
 def shse_summary(date_str):

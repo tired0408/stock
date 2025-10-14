@@ -6,6 +6,7 @@ import datetime
 import pandas as pd
 import numpy as np
 import utils_akshare as utils
+from show_result import create_styled_table
 from typing import List
 from plotly import graph_objects as go
 from plotly.subplots import make_subplots
@@ -13,12 +14,12 @@ from plotly.subplots import make_subplots
 def get_trade_date() -> List[datetime.time]:
     """获取交易日历"""
     today = datetime.datetime.now()
-    if today.hour > 15:
+    if today.hour >= 15:
         today = today + datetime.timedelta(days=1)
     today = today.date()
     df_trade_date = utils.trade_date()
     df_trade_date = df_trade_date[df_trade_date['trade_date'] < today]
-    df_trade_date = df_trade_date.tail(1)
+    df_trade_date = df_trade_date.tail(2)
     df_trade_date = df_trade_date['trade_date'].tolist()
     return df_trade_date
 
@@ -63,7 +64,7 @@ def get_top20_summary(date_range: List[datetime.time]) -> List[float]:
     return rd    
 
 def data2html(dates, total, hs300, micro, hundred, top20):
-    df = pd.DataFrame({
+    df_source = pd.DataFrame({
         "沪深两市": total,
         "沪深300": hs300,
         "微盘股": micro,
@@ -71,10 +72,13 @@ def data2html(dates, total, hs300, micro, hundred, top20):
         "沪深前20": top20
     }, index=dates)
     # 计算占比和涨幅
-    names = df.columns[df.columns != "沪深两市"].tolist()
+    df_result = pd.DataFrame({"日期": dates})
+    names = df_source.columns[df_source.columns != "沪深两市"].tolist()
     for col in names:
-        df[col+'_占比'] = df[col] / df['沪深两市'] * 100
-        df[col+'_占比涨幅'] = df[f"{col}_占比"].pct_change() * 100
+        df_result[col+'_占比'] = df_result[col] / df_result['沪深两市'] * 100
+        df_result[col+'_占比涨幅'] = df_result[f"{col}_占比"].pct_change() * 100
+    # 输出展示图表
+    create_styled_table(df_result, [name for name in df_result.columns if "涨幅" in name])
     # 创建图表
     fig = make_subplots(
         rows=2, cols=1,
@@ -83,22 +87,22 @@ def data2html(dates, total, hs300, micro, hundred, top20):
         subplot_titles=("微盘股、百元股等占比", "微盘股、百元股等占比涨幅")
     )
     # 添加占比柱状图
-    for i, col in enumerate(names):
+    for _, col in enumerate(names):
         fig.add_trace(go.Bar(
-            x=df.index.astype(str),  # X轴偏移，使柱并列
-            y=df[col+'_占比'],
+            x=df_result["日期"].astype(str),  # X轴偏移，使柱并列
+            y=df_result[col+'_占比'],
             name=f'{col}占比',
-            text=[f'{v:.2%}' for v in df[col+'_占比']],  # 鼠标提示显示百分比
+            text=[f'{v:.2%}' for v in df_result[col+'_占比']],  # 鼠标提示显示百分比
             hoverinfo='text',
         ), row=1, col=1)
     # 添加涨幅折线
     for col, color in zip(names, ['blue','orange','green','red']):
         fig.add_trace(go.Scatter(
-            x=df.index.astype(str),
-            y=df[col+'_涨幅'],
+            x=df_result["日期"].astype(str),
+            y=df_result[col+'_占比涨幅'],
             mode='lines+markers',
-            name=f'{col}涨幅',
-            text=[f'{v:.1f}%' if not pd.isna(v) else '' for v in df[col+'_涨幅']],
+            name=f'{col}占比涨幅',
+            text=[f'{v:.1f}%' if not pd.isna(v) else '' for v in df_result[col+'_占比涨幅']],
             marker=dict(color=color),
             line=dict(color=color)
         ), row=2, col=1)
@@ -117,13 +121,13 @@ def data2html(dates, total, hs300, micro, hundred, top20):
 def main():
     """主函数"""
     trade_date = get_trade_date()
+    top20_amount = get_top20_summary(trade_date)
     sz_amount = get_szse_summary(trade_date)
     sh_amount = get_shse_summary(trade_date)
     total_amout = (np.array(sz_amount) + np.array(sh_amount)).tolist()
     hs300_amount = get_dfcf_concept_summary(trade_date, "HS300_")
     micro_amount = get_dfcf_concept_summary(trade_date, "微盘股")
     hundred_amount = get_dfcf_concept_summary(trade_date, "百元股")
-    top20_amount = get_top20_summary(trade_date)
     data2html(trade_date, total_amout, hs300_amount, micro_amount, hundred_amount, top20_amount)
 
 if __name__ == "__main__":
