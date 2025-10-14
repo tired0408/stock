@@ -127,11 +127,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-
 # idea file
 .idea/
-# test file
-test*.py
 # 忽视一些比较大的文件
 *.txt
 *.mp3
@@ -148,3 +145,4 @@ deepLearning/**/*.png
 # myself
 .vscode
 data/
+test*
