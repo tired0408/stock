@@ -145,8 +145,8 @@ def __market_classify(date_str, name, method):
             series = df.iloc[0]
             datas.loc[index, series.index] = series.values
     finally:
-        count = datas["换手率"].isna().any(axis=1).sum()
-        print(f"数据缺失行数:{count}")
+        count = datas["换手率"].isna().sum()
+        print(f"数据缺失行数:{count}, 总行数:{datas.shape[0]}")
         datas.to_csv(tmp_path, index=False)
     return datas
 

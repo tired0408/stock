@@ -31,9 +31,7 @@ def get_text_color(row_idx, col_idx, value, title_list, color_titles):
         return 'white'  # 白色文字
     
     # 指定需要条件着色的列
-    color_titles = ['利润', '收益', '波动', '差额']
     title = title_list[col_idx]
-    
     # 如果当前列是需要条件着色的列
     if title in color_titles:
         try:
@@ -49,7 +47,7 @@ def get_text_color(row_idx, col_idx, value, title_list, color_titles):
 # ==================== 4. 创建表格图片 ====================
 def create_styled_table(df: pd.DataFrame, color_titles):
     # 创建图形
-    fig, ax = plt.subplots(figsize=(16, 8))
+    _, ax = plt.subplots(figsize=(11, 5))
     ax.axis('tight')
     ax.axis('off')
     
@@ -80,7 +78,7 @@ def create_styled_table(df: pd.DataFrame, color_titles):
     # 设置表格样式
     table.auto_set_font_size(False)
     table.set_fontsize(10)
-    table.scale(1.2, 2.0)
+    table.scale(0.8, 2.0)
     
     # 设置文字颜色
     for i in range(len(cell_data)):

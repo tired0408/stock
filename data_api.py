@@ -10,6 +10,7 @@ from show_result import create_styled_table
 from typing import List
 from plotly import graph_objects as go
 from plotly.subplots import make_subplots
+from requests.exceptions import ConnectionError
 
 def get_trade_date() -> List[datetime.time]:
     """获取交易日历"""
@@ -72,52 +73,54 @@ def data2html(dates, total, hs300, micro, hundred, top20):
         "沪深前20": top20
     }, index=dates)
     # 计算占比和涨幅
-    df_result = pd.DataFrame({"日期": dates})
+    df_result = pd.DataFrame(index=dates)
     names = df_source.columns[df_source.columns != "沪深两市"].tolist()
     for col in names:
-        df_result[col+'_占比'] = df_result[col] / df_result['沪深两市'] * 100
-        df_result[col+'_占比涨幅'] = df_result[f"{col}_占比"].pct_change() * 100
+        df_result[col+'_占比'] = df_source[col] / df_source['沪深两市'] * 100
+        df_result[col+'_占比涨幅'] = df_result[f"{col}_占比"].pct_change(fill_method=None) * 100
+    df_result = df_result.round(2)
+    df_result = df_result.reset_index(names='日期')
     # 输出展示图表
     create_styled_table(df_result, [name for name in df_result.columns if "涨幅" in name])
     # 创建图表
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.15,
-        subplot_titles=("微盘股、百元股等占比", "微盘股、百元股等占比涨幅")
-    )
-    # 添加占比柱状图
-    for _, col in enumerate(names):
-        fig.add_trace(go.Bar(
-            x=df_result["日期"].astype(str),  # X轴偏移，使柱并列
-            y=df_result[col+'_占比'],
-            name=f'{col}占比',
-            text=[f'{v:.2%}' for v in df_result[col+'_占比']],  # 鼠标提示显示百分比
-            hoverinfo='text',
-        ), row=1, col=1)
-    # 添加涨幅折线
-    for col, color in zip(names, ['blue','orange','green','red']):
-        fig.add_trace(go.Scatter(
-            x=df_result["日期"].astype(str),
-            y=df_result[col+'_占比涨幅'],
-            mode='lines+markers',
-            name=f'{col}占比涨幅',
-            text=[f'{v:.1f}%' if not pd.isna(v) else '' for v in df_result[col+'_占比涨幅']],
-            marker=dict(color=color),
-            line=dict(color=color)
-        ), row=2, col=1)
-    fig.update_layout(
-        barmode='group',
-        showlegend=True,
-        title_text="市场情况分析图表",
-        margin=dict(l=80, r=80, t=100, b=80)
-    )
-    # X轴设置为分类轴
-    fig.update_xaxes(type='category', row=1, col=1)
-    fig.update_xaxes(type='category', row=2, col=1)
-    # 保存为离线 HTML 文件
-    fig.write_html('股市大盘分析图表.html', auto_open=True)
-    print("已保存为离线html文件")
+    # fig = make_subplots(
+    #     rows=2, cols=1,
+    #     shared_xaxes=True,
+    #     vertical_spacing=0.15,
+    #     subplot_titles=("微盘股、百元股等占比", "微盘股、百元股等占比涨幅")
+    # )
+    # # 添加占比柱状图
+    # for _, col in enumerate(names):
+    #     fig.add_trace(go.Bar(
+    #         x=df_result["日期"].astype(str),  # X轴偏移，使柱并列
+    #         y=df_result[col+'_占比'],
+    #         name=f'{col}占比',
+    #         text=[f'{v:.2%}' for v in df_result[col+'_占比']],  # 鼠标提示显示百分比
+    #         hoverinfo='text',
+    #     ), row=1, col=1)
+    # # 添加涨幅折线
+    # for col, color in zip(names, ['blue','orange','green','red']):
+    #     fig.add_trace(go.Scatter(
+    #         x=df_result["日期"].astype(str),
+    #         y=df_result[col+'_占比涨幅'],
+    #         mode='lines+markers',
+    #         name=f'{col}占比涨幅',
+    #         text=[f'{v:.1f}%' if not pd.isna(v) else '' for v in df_result[col+'_占比涨幅']],
+    #         marker=dict(color=color),
+    #         line=dict(color=color)
+    #     ), row=2, col=1)
+    # fig.update_layout(
+    #     barmode='group',
+    #     showlegend=True,
+    #     title_text="市场情况分析图表",
+    #     margin=dict(l=80, r=80, t=100, b=80)
+    # )
+    # # X轴设置为分类轴
+    # fig.update_xaxes(type='category', row=1, col=1)
+    # fig.update_xaxes(type='category', row=2, col=1)
+    # # 保存为离线 HTML 文件
+    # fig.write_html('股市大盘分析图表.html', auto_open=False)
+    # print("已保存为离线html文件")
 def main():
     """主函数"""
     trade_date = get_trade_date()
@@ -131,4 +134,9 @@ def main():
     data2html(trade_date, total_amout, hs300_amount, micro_amount, hundred_amount, top20_amount)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ConnectionError as e:
+        print("访问接口地址连接失败,请稍后重试")
+    except Exception as e:
+        print(e)
