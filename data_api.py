@@ -22,6 +22,7 @@ def get_trade_date() -> List[datetime.time]:
     df_trade_date = utils.trade_date()
     df_trade_date = df_trade_date[df_trade_date['trade_date'] < today]
     df_trade_date = df_trade_date[df_trade_date['trade_date'] >= start_date]
+    df_trade_date = df_trade_date.tail(28)
     df_trade_date = df_trade_date['trade_date'].tolist()
     return df_trade_date
 
