@@ -18,9 +18,10 @@ def get_trade_date() -> List[datetime.time]:
     if today.hour >= 15:
         today = today + datetime.timedelta(days=1)
     today = today.date()
+    start_date = datetime.datetime.strptime('20251013', '%Y%m%d').date()
     df_trade_date = utils.trade_date()
     df_trade_date = df_trade_date[df_trade_date['trade_date'] < today]
-    df_trade_date = df_trade_date.tail(2)
+    df_trade_date = df_trade_date[df_trade_date['trade_date'] >= start_date]
     df_trade_date = df_trade_date['trade_date'].tolist()
     return df_trade_date
 

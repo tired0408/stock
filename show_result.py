@@ -47,7 +47,7 @@ def get_text_color(row_idx, col_idx, value, title_list, color_titles):
 # ==================== 4. 创建表格图片 ====================
 def create_styled_table(df: pd.DataFrame, color_titles):
     # 创建图形
-    _, ax = plt.subplots(figsize=(11, 5))
+    _, ax = plt.subplots(figsize=(13, 5))
     ax.axis('tight')
     ax.axis('off')
     
