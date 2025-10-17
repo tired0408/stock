@@ -1,15 +1,12 @@
 """
 使用akshar获取股票数据的API接口
 """
-import os
 import datetime
 import pandas as pd
 import numpy as np
 import utils_akshare as utils
 from show_result import create_styled_table
 from typing import List
-from plotly import graph_objects as go
-from plotly.subplots import make_subplots
 from requests.exceptions import ConnectionError
 
 def get_trade_date() -> List[datetime.time]:
@@ -126,13 +123,20 @@ def data2html(dates, total, hs300, micro, hundred, top20):
 def main():
     """主函数"""
     trade_date = get_trade_date()
+    print("获取股市成交额前20的合计成交额")
     top20_amount = get_top20_summary(trade_date)
+    print("获取深圳交易所成交数据")
     sz_amount = get_szse_summary(trade_date)
+    print("获取上海交易所成交数据")
     sh_amount = get_shse_summary(trade_date)
     total_amout = (np.array(sz_amount) + np.array(sh_amount)).tolist()
+    print("获取沪深300成交数据")
     hs300_amount = get_dfcf_concept_summary(trade_date, "HS300_")
+    print("获取微盘股成交数据")
     micro_amount = get_dfcf_concept_summary(trade_date, "微盘股")
+    print("获取百元股成交数据")
     hundred_amount = get_dfcf_concept_summary(trade_date, "百元股")
+    print("将数据转化成所需图表")
     data2html(trade_date, total_amout, hs300_amount, micro_amount, hundred_amount, top20_amount)
 
 if __name__ == "__main__":
