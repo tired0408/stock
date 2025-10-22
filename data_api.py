@@ -144,5 +144,3 @@ if __name__ == "__main__":
         main()
     except ConnectionError as e:
         print("访问接口地址连接失败,请稍后重试")
-    except Exception as e:
-        print(e)
