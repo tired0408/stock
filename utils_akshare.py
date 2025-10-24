@@ -9,6 +9,10 @@ import akshare as ak
 from typing import List
 
 data_path = r"E:\py-workspace\stock\data"
+
+class CustomException(Exception):
+    """自定义错误"""
+
 def trade_date():
     """获取交易日期"""
     path = os.path.join(data_path, "trade_date.csv")
@@ -46,7 +50,7 @@ def szse_summary(date_str):
     """
     rd = ak.stock_szse_summary(date=date_str)
     if len(rd) < 14:
-        raise Exception("深圳交易所的每日概况数据还没有更新")
+        raise CustomException("深圳交易所的每日概况数据还没有更新")
     return rd
 
 @cache("shse_summary")
@@ -57,13 +61,13 @@ def shse_summary(date_str):
 
 def concept_summary(date_range: List[datetime.time], name):
     """获取概念板块的成交数据"""
-    df = __concept_summary_by_local(date_range, name)
-    if df is not None:
-        return df
+    rd = __concept_summary_by_local(date_range, name)
+    if rd is not None:
+        return rd
     st = date_range[0].strftime('%Y%m%d')
     ed = date_range[-1].strftime('%Y%m%d')
-    df = ak.stock_board_concept_hist_em(symbol=name, period="daily", start_date=st, end_date=ed)
-    for _, row in df.iterrows():
+    rd = ak.stock_board_concept_hist_em(symbol=name, period="daily", start_date=st, end_date=ed)
+    for _, row in rd.iterrows():
         each_date: datetime.time = datetime.datetime.strptime(row["日期"], "%Y-%m-%d")
         cache_path = os.path.join(data_path, each_date.strftime('%Y%m%d'), "concept_summary.csv")
         row = row[row.index != "日期"]
@@ -78,7 +82,7 @@ def concept_summary(date_range: List[datetime.time], name):
         else:
             df = row.to_frame().T
         df.to_csv(cache_path, index=False)
-    return df
+    return rd
 
 
 @cache("sh_a_spot")
