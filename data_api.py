@@ -61,7 +61,11 @@ def szse_summary(date_str):
 @cache("shse_summary")
 def shse_summary(date_str):
     """获取上证交易所的成交数据"""
-    return ak.stock_sse_deal_daily(date=date_str)
+    try:
+        rd = ak.stock_sse_deal_daily(date=date_str)
+    except ValueError:
+        raise CustomException("上证交易所的每日概况数据还没有更新")
+    return rd
 
 def shsz_amount(date_range: List[datetime.time]) -> List[pd.DataFrame]:
     """获取沪深两市的成交额数据"""
@@ -87,7 +91,7 @@ def get_trade_date() -> List[datetime.time]:
     if today.hour >= 15:
         today = today + datetime.timedelta(days=1)
     today = today.date()
-    start_date = datetime.datetime.strptime('20251015', '%Y%m%d').date()
+    start_date = datetime.datetime.strptime('20251013', '%Y%m%d').date()
     df_trade_date = trade_date()
     df_trade_date = df_trade_date[df_trade_date['trade_date'] < today]
     df_trade_date = df_trade_date[df_trade_date['trade_date'] >= start_date]
